@@ -1,0 +1,46 @@
+use discord_presence::Client as DiscordClient;
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::*;
+use tower_lsp::{Client, LanguageServer, LspService, Server};
+
+const DISCORD_APPLICATION_ID: u64 = 1470506076574187745;
+
+struct Backend {
+    client: Client,
+}
+
+#[tower_lsp::async_trait]
+impl LanguageServer for Backend {
+    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+        Ok(InitializeResult {
+            server_info: Some(ServerInfo {
+                name: "discord-lsp-presence".to_string(),
+                version: Some("0.1.0".to_string()),
+            }),
+            capabilities: ServerCapabilities {
+                ..Default::default()
+            },
+        })
+    }
+
+    async fn initialized(&self, _: InitializedParams) {
+        self.client
+            .log_message(MessageType::INFO, "LSP initialized.")
+            .await;
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let drpc = DiscordClient::new(DISCORD_APPLICATION_ID);
+
+    let (service, socket) = LspService::new(|client| Backend { client });
+
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    Server::new(stdin, stdout, socket).serve(service).await;
+}
