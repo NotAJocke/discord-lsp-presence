@@ -1,4 +1,6 @@
 use discord_presence::Client as DiscordClient;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -7,6 +9,7 @@ const DISCORD_APPLICATION_ID: u64 = 1470506076574187745;
 
 struct Backend {
     client: Client,
+    discord: Arc<Mutex<DiscordClient>>,
 }
 
 #[tower_lsp::async_trait]
@@ -24,8 +27,12 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        let mut discord = self.discord.lock().await;
+        
+        discord.start();
+        
         self.client
-            .log_message(MessageType::INFO, "LSP initialized.")
+            .log_message(MessageType::INFO, "Discord client started.")
             .await;
     }
 
@@ -36,9 +43,26 @@ impl LanguageServer for Backend {
 
 #[tokio::main]
 async fn main() {
-    let drpc = DiscordClient::new(DISCORD_APPLICATION_ID);
+    let discord = Arc::new(Mutex::new(DiscordClient::new(DISCORD_APPLICATION_ID)));
+    
+    {
+        let discord_client = discord.lock().await;
+        discord_client.on_ready({
+            let dc = Arc::clone(&discord);
+            move |_ctx| {
+                if let Ok(mut client) = dc.try_lock() {
+                    let _ = client.set_activity(|activity| activity.state("hello world"));
+                }
+            }
+        }).persist();
+        
+        discord_client.on_error(|_ctx| {
+            eprintln!("Failed to connect to Discord. Exiting.");
+            std::process::exit(1);
+        }).persist();
+    }
 
-    let (service, socket) = LspService::new(|client| Backend { client });
+    let (service, socket) = LspService::new(move |client| Backend { client, discord });
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
