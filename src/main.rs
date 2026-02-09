@@ -28,9 +28,8 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         let mut discord = self.discord.lock().await;
-        
         discord.start();
-        
+
         self.client
             .log_message(MessageType::INFO, "Discord client started.")
             .await;
@@ -44,22 +43,25 @@ impl LanguageServer for Backend {
 #[tokio::main]
 async fn main() {
     let discord = Arc::new(Mutex::new(DiscordClient::new(DISCORD_APPLICATION_ID)));
-    
+
     {
-        let discord_client = discord.lock().await;
-        discord_client.on_ready({
-            let dc = Arc::clone(&discord);
-            move |_ctx| {
-                if let Ok(mut client) = dc.try_lock() {
-                    let _ = client.set_activity(|activity| activity.state("hello world"));
-                }
+        let drpc = discord.lock().await;
+        let discord = Arc::clone(&discord);
+
+        drpc.on_ready(move |_ctx| {
+            let mut client = discord.blocking_lock();
+
+            if let Err(e) = client.set_activity(|a| a.state("hello world")) {
+                eprintln!("Failed to set activity: {}", e);
             }
-        }).persist();
-        
-        discord_client.on_error(|_ctx| {
-            eprintln!("Failed to connect to Discord. Exiting.");
+        })
+        .persist();
+
+        drpc.on_error(|_ctx| {
+            eprintln!("Discord connection error. Exiting.");
             std::process::exit(1);
-        }).persist();
+        })
+        .persist();
     }
 
     let (service, socket) = LspService::new(move |client| Backend { client, discord });
