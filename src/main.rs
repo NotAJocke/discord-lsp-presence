@@ -1,4 +1,8 @@
 use discord_presence::Client as DiscordClient;
+use serde::Deserialize;
+use std::env::home_dir;
+use std::path::PathBuf;
+use std::process::ExitStatus;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -123,8 +127,51 @@ impl LanguageServer for Backend {
     }
 }
 
+fn get_config_dir() -> Option<PathBuf> {
+    home_dir().and_then(|home| Some(home.join(".config").join("discord-presence-lsp")))
+}
+
+fn ensure_config() -> std::result::Result<PathBuf, &'static str> {
+    let Some(path) = get_config_dir() else {
+        return Err("Couldn't get config directory");
+    };
+
+    if !path.exists() {
+        if std::fs::create_dir_all(&path).is_err() {
+            return Err("Couldn't create config dir");
+        }
+    }
+
+    let path = path.join("config.toml");
+
+    if !path.exists() {
+        if std::fs::write(&path, "foo = 'bar'").is_err() {
+            return Err("Couldn't create config file");
+        }
+    }
+
+    Ok(path)
+}
+
+#[derive(Deserialize, Debug)]
+struct Config {
+    foo: String,
+}
+
 #[tokio::main]
 async fn main() {
+    let maybe_config = ensure_config();
+
+    if let Err(e) = maybe_config {
+        eprintln!("{e}");
+    };
+
+    let config = std::fs::read_to_string(maybe_config.unwrap()).unwrap();
+
+    let config: Config = toml::from_str(&config).unwrap();
+
+    let _ = dbg!(config);
+
     let discord = Arc::new(Mutex::new(DiscordClient::new(DISCORD_APPLICATION_ID)));
 
     {
