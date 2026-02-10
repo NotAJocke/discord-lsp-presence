@@ -21,6 +21,9 @@ impl LanguageServer for Backend {
                 version: Some("0.1.0".to_string()),
             }),
             capabilities: ServerCapabilities {
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                    TextDocumentSyncKind::FULL,
+                )),
                 ..Default::default()
             },
         })
@@ -38,6 +41,86 @@ impl LanguageServer for Backend {
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        self.client
+            .log_message(MessageType::INFO, "Opened file")
+            .await;
+
+        if !DiscordClient::is_ready() {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    "Discord not ready, skipping activity update",
+                )
+                .await;
+            return;
+        }
+
+        if let Some(filename) = params
+            .text_document
+            .uri
+            .path_segments()
+            .and_then(|s| s.last())
+        {
+            let mut discord = self.discord.lock().await;
+            match discord.set_activity(|a| a.state(format!("Editing: {}", filename))) {
+                Ok(_) => {
+                    self.client
+                        .log_message(MessageType::INFO, &format!("Set activity to: {}", filename))
+                        .await;
+                }
+                Err(e) => {
+                    self.client
+                        .log_message(
+                            MessageType::ERROR,
+                            &format!("Failed to set activity: {}", e),
+                        )
+                        .await;
+                }
+            }
+        }
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        self.client
+            .log_message(MessageType::INFO, "File changed")
+            .await;
+
+        if !DiscordClient::is_ready() {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    "Discord not ready, skipping activity update",
+                )
+                .await;
+            return;
+        }
+
+        if let Some(filename) = params
+            .text_document
+            .uri
+            .path_segments()
+            .and_then(|s| s.last())
+        {
+            let mut discord = self.discord.lock().await;
+            match discord.set_activity(|a| a.state(format!("Editing: {}", filename))) {
+                Ok(_) => {
+                    self.client
+                        .log_message(MessageType::INFO, &format!("Set activity to: {}", filename))
+                        .await;
+                }
+                Err(e) => {
+                    self.client
+                        .log_message(
+                            MessageType::ERROR,
+                            &format!("Failed to set activity: {}", e),
+                        )
+                        .await;
+                }
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -50,6 +133,7 @@ async fn main() {
 
         drpc.on_ready(move |_ctx| {
             let mut client = discord.blocking_lock();
+            eprintln!("Client ready");
 
             if let Err(e) = client.set_activity(|a| a.state("hello world")) {
                 eprintln!("Failed to set activity: {}", e);
