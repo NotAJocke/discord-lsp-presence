@@ -2,7 +2,6 @@ use discord_presence::Client as DiscordClient;
 use serde::Deserialize;
 use std::env::home_dir;
 use std::path::PathBuf;
-use std::process::ExitStatus;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -223,15 +222,9 @@ async fn main() {
 
     {
         let drpc = discord.lock().await;
-        let discord = Arc::clone(&discord);
 
         drpc.on_ready(move |_ctx| {
-            let mut client = discord.blocking_lock();
-            eprintln!("Client ready");
-
-            if let Err(e) = client.set_activity(|a| a.state("hello world")) {
-                eprintln!("Failed to set activity: {}", e);
-            }
+            eprintln!("Discord client ready");
         })
         .persist();
 
