@@ -1,22 +1,20 @@
 use discord_presence::Client as DiscordClient;
-use serde::Deserialize;
-use std::env::home_dir;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use url::Url;
 
-const DISCORD_APPLICATION_ID: u64 = 1470506076574187745;
+mod config;
+mod discord;
+mod state;
+mod workspace;
 
-struct FileState {
-    filename: String,
-    workspace: String,
-    start_time: Instant,
-}
+use state::FileState;
+use workspace::{detect_workspace_name, get_filename_from_uri};
+
+const DISCORD_APPLICATION_ID: u64 = 1470506076574187745;
 
 struct Backend {
     client: Client,
@@ -59,26 +57,7 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "Opened file")
             .await;
 
-        let uri = &params.text_document.uri;
-        let filename = uri
-            .path_segments()
-            .and_then(|s| s.last())
-            .map(|s| s.to_string());
-        let workspace_name = detect_workspace_name(uri);
-
-        if let Some(filename) = filename {
-            let workspace = workspace_name.unwrap_or_else(|| "unknown workspace".to_string());
-            let state = FileState {
-                filename: filename.clone(),
-                workspace: workspace.clone(),
-                start_time: Instant::now(),
-            };
-            *self.current_file.lock().await = Some(state);
-
-            if DiscordClient::is_ready() {
-                self.update_presence(&filename, &workspace).await;
-            }
-        }
+        self.handle_file_event(&params.text_document.uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -86,127 +65,37 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "File changed")
             .await;
 
-        let uri = &params.text_document.uri;
-        let filename = uri
-            .path_segments()
-            .and_then(|s| s.last())
-            .map(|s| s.to_string());
-        let workspace_name = detect_workspace_name(uri);
-
-        if let Some(filename) = filename {
-            let workspace = workspace_name.unwrap_or_else(|| "unknown workspace".to_string());
-            let state = FileState {
-                filename: filename.clone(),
-                workspace: workspace.clone(),
-                start_time: Instant::now(),
-            };
-            *self.current_file.lock().await = Some(state);
-
-            if DiscordClient::is_ready() {
-                self.update_presence(&filename, &workspace).await;
-            }
-        }
+        self.handle_file_event(&params.text_document.uri).await;
     }
 }
 
 impl Backend {
-    async fn update_presence(&self, filename: &str, workspace: &str) {
-        let mut discord = self.discord.lock().await;
-        let state = format!("in {}", workspace);
+    async fn handle_file_event(&self, uri: &Url) {
+        let filename = get_filename_from_uri(uri);
+        let workspace_name = detect_workspace_name(uri);
 
-        match discord.set_activity(|a| {
-            a.details(format!("Editing: {}", filename))
-                .state(&state)
-                .timestamps(|t| t.start(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()))
-        }) {
-            Ok(_) => {
-                self.client
-                    .log_message(
-                        MessageType::INFO,
-                        &format!("Set activity to: Editing: {} {}", filename, state),
-                    )
-                    .await;
-            }
-            Err(e) => {
-                self.client
-                    .log_message(
-                        MessageType::ERROR,
-                        &format!("Failed to set activity: {}", e),
-                    )
-                    .await;
+        if let Some(filename) = filename {
+            let workspace = workspace_name.unwrap_or_else(|| "unknown workspace".to_string());
+            let state = FileState::new(filename.clone(), workspace.clone());
+            *self.current_file.lock().await = Some(state);
+
+            if DiscordClient::is_ready() {
+                discord::update_presence(&self.discord, &self.client, &filename, &workspace).await;
             }
         }
     }
-}
-
-fn detect_workspace_name(uri: &Url) -> Option<String> {
-    let path = uri.to_file_path().ok()?;
-    let mut current_dir = path.parent()?;
-
-    loop {
-        if current_dir.join(".git").exists() {
-            return current_dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(|s| s.to_string());
-        }
-
-        match current_dir.parent() {
-            Some(parent) => current_dir = parent,
-            None => break,
-        }
-    }
-
-    path.parent()
-        .and_then(|dir| dir.file_name())
-        .and_then(|name| name.to_str())
-        .map(|s| s.to_string())
-}
-
-fn get_config_dir() -> Option<PathBuf> {
-    home_dir().and_then(|home| Some(home.join(".config").join("discord-presence-lsp")))
-}
-
-fn ensure_config() -> std::result::Result<PathBuf, &'static str> {
-    let Some(path) = get_config_dir() else {
-        return Err("Couldn't get config directory");
-    };
-
-    if !path.exists() {
-        if std::fs::create_dir_all(&path).is_err() {
-            return Err("Couldn't create config dir");
-        }
-    }
-
-    let path = path.join("config.toml");
-
-    if !path.exists() {
-        if std::fs::write(&path, "foo = 'bar'").is_err() {
-            return Err("Couldn't create config file");
-        }
-    }
-
-    Ok(path)
-}
-
-#[derive(Deserialize, Debug)]
-struct Config {
-    foo: String,
 }
 
 #[tokio::main]
 async fn main() {
-    let maybe_config = ensure_config();
+    let maybe_config = config::ensure_config();
 
     if let Err(e) = maybe_config {
         eprintln!("{e}");
     };
 
-    let config = std::fs::read_to_string(maybe_config.unwrap()).unwrap();
-
-    let config: Config = toml::from_str(&config).unwrap();
-
-    let _ = dbg!(config);
+    let config_str = std::fs::read_to_string(maybe_config.unwrap()).unwrap();
+    let _config: config::Config = toml::from_str(&config_str).unwrap();
 
     let discord = Arc::new(Mutex::new(DiscordClient::new(DISCORD_APPLICATION_ID)));
 
@@ -242,7 +131,12 @@ async fn main() {
         .persist();
     }
 
-    let (service, socket) = LspService::new(move |client| Backend { client, discord, current_file: Arc::clone(&current_file) });
+    let current_file_clone = Arc::clone(&current_file);
+    let (service, socket) = LspService::new(move |client| Backend { 
+        client, 
+        discord: Arc::clone(&discord), 
+        current_file: Arc::clone(&current_file_clone) 
+    });
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
