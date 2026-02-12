@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+use url::Url;
 
 const DISCORD_APPLICATION_ID: u64 = 1470506076574187745;
 
@@ -61,17 +62,28 @@ impl LanguageServer for Backend {
             return;
         }
 
-        if let Some(filename) = params
-            .text_document
-            .uri
+        let uri = &params.text_document.uri;
+        let filename = uri
             .path_segments()
             .and_then(|s| s.last())
-        {
+            .map(|s| s.to_string());
+        let workspace_name = detect_workspace_name(uri);
+
+        if let Some(filename) = filename {
             let mut discord = self.discord.lock().await;
-            match discord.set_activity(|a| a.state(format!("Editing: {}", filename))) {
+            let state = workspace_name
+                .map(|name| format!("in {}", name))
+                .unwrap_or_else(|| "in unknown workspace".to_string());
+
+            match discord
+                .set_activity(|a| a.details(format!("Editing: {}", filename)).state(&state))
+            {
                 Ok(_) => {
                     self.client
-                        .log_message(MessageType::INFO, &format!("Set activity to: {}", filename))
+                        .log_message(
+                            MessageType::INFO,
+                            &format!("Set activity to: Editing: {} {}", filename, state),
+                        )
                         .await;
                 }
                 Err(e) => {
@@ -101,17 +113,28 @@ impl LanguageServer for Backend {
             return;
         }
 
-        if let Some(filename) = params
-            .text_document
-            .uri
+        let uri = &params.text_document.uri;
+        let filename = uri
             .path_segments()
             .and_then(|s| s.last())
-        {
+            .map(|s| s.to_string());
+        let workspace_name = detect_workspace_name(uri);
+
+        if let Some(filename) = filename {
             let mut discord = self.discord.lock().await;
-            match discord.set_activity(|a| a.state(format!("Editing: {}", filename))) {
+            let state = workspace_name
+                .map(|name| format!("in {}", name))
+                .unwrap_or_else(|| "in unknown workspace".to_string());
+
+            match discord
+                .set_activity(|a| a.details(format!("Editing: {}", filename)).state(&state))
+            {
                 Ok(_) => {
                     self.client
-                        .log_message(MessageType::INFO, &format!("Set activity to: {}", filename))
+                        .log_message(
+                            MessageType::INFO,
+                            &format!("Set activity to: Editing: {} {}", filename, state),
+                        )
                         .await;
                 }
                 Err(e) => {
@@ -125,6 +148,30 @@ impl LanguageServer for Backend {
             }
         }
     }
+}
+
+fn detect_workspace_name(uri: &Url) -> Option<String> {
+    let path = uri.to_file_path().ok()?;
+    let mut current_dir = path.parent()?;
+
+    loop {
+        if current_dir.join(".git").exists() {
+            return current_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|s| s.to_string());
+        }
+
+        match current_dir.parent() {
+            Some(parent) => current_dir = parent,
+            None => break,
+        }
+    }
+
+    path.parent()
+        .and_then(|dir| dir.file_name())
+        .and_then(|name| name.to_str())
+        .map(|s| s.to_string())
 }
 
 fn get_config_dir() -> Option<PathBuf> {
