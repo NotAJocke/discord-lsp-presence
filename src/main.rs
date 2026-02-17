@@ -11,14 +11,14 @@ mod discord;
 mod state;
 mod workspace;
 
+use config::Config;
 use state::FileState;
 use workspace::{detect_workspace_name, get_filename_from_uri};
-
-const DISCORD_APPLICATION_ID: u64 = 1470506076574187745;
 
 struct Backend {
     client: Client,
     discord: Arc<Mutex<DiscordClient>>,
+    config: Arc<Config>,
     current_file: Arc<Mutex<Option<FileState>>>,
 }
 
@@ -80,7 +80,7 @@ impl Backend {
             *self.current_file.lock().await = Some(state);
 
             if DiscordClient::is_ready() {
-                discord::update_presence(&self.discord, &self.client, &filename, &workspace).await;
+                discord::update_presence(&self.discord, &self.client, &self.config, &filename, &workspace).await;
             }
         }
     }
@@ -94,14 +94,21 @@ async fn main() {
         eprintln!("{e}");
     };
 
-    let config_str = std::fs::read_to_string(maybe_config.unwrap()).unwrap();
-    let _config: config::Config = toml::from_str(&config_str).unwrap();
+    let config_path = maybe_config.unwrap();
+    let config = match Config::load(&config_path) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            eprintln!("Failed to load config: {}", e);
+            std::process::exit(1);
+        }
+    };
 
-    let discord = Arc::new(Mutex::new(DiscordClient::new(DISCORD_APPLICATION_ID)));
+    let discord = Arc::new(Mutex::new(DiscordClient::new(config.application_id)));
 
     let current_file: Arc<Mutex<Option<FileState>>> = Arc::new(Mutex::new(None));
     let current_file_for_ready = Arc::clone(&current_file);
     let discord_for_ready = Arc::clone(&discord);
+    let config_for_ready = Arc::clone(&config);
 
     {
         let drpc = discord.lock().await;
@@ -111,13 +118,9 @@ async fn main() {
             
             if let Some(file_state) = current_file_for_ready.blocking_lock().as_ref() {
                 eprintln!("Setting initial presence for: {}", file_state.filename);
-                let state = format!("in {}", file_state.workspace);
+                let activity = config_for_ready.build_activity(&file_state.filename, &file_state.workspace);
                 let mut client = discord_for_ready.blocking_lock();
-                if let Err(e) = client.set_activity(|a| {
-                    a.details(format!("Editing: {}", file_state.filename))
-                        .state(&state)
-                        .timestamps(|t| t.start(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()))
-                }) {
+                if let Err(e) = client.set_activity(|_| activity) {
                     eprintln!("Failed to set initial activity: {}", e);
                 }
             }
@@ -132,9 +135,11 @@ async fn main() {
     }
 
     let current_file_clone = Arc::clone(&current_file);
+    let config_clone = Arc::clone(&config);
     let (service, socket) = LspService::new(move |client| Backend { 
         client, 
         discord: Arc::clone(&discord), 
+        config: Arc::clone(&config_clone),
         current_file: Arc::clone(&current_file_clone) 
     });
 
