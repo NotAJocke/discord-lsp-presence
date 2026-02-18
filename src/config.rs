@@ -4,38 +4,18 @@ use std::env::home_dir;
 use std::path::PathBuf;
 
 pub fn get_config_dir() -> Option<PathBuf> {
-    home_dir().and_then(|home| Some(home.join(".config").join("discord-presence-lsp")))
+    home_dir().map(|home| home.join(".config").join("discord-presence-lsp"))
 }
 
-pub fn ensure_config() -> std::result::Result<PathBuf, &'static str> {
-    let Some(path) = get_config_dir() else {
-        return Err("Couldn't get config directory");
-    };
+const DEFAULT_APPLICATION_ID: u64 = 1470506076574187745;
+const DEFAULT_DETAILS: &str = "Editing: {filename}";
+const DEFAULT_STATE: &str = "in {workspace}";
 
-    if !path.exists() {
-        if std::fs::create_dir_all(&path).is_err() {
-            return Err("Couldn't create config dir");
-        }
-    }
-
-    let path = path.join("config.toml");
-
-    if !path.exists() {
-        let default_config = r#"application_id = 1470506076574187745
-
-[activity]
-details = "Editing: {filename}"
-state = "in {workspace}"
-"#;
-        if std::fs::write(&path, default_config).is_err() {
-            return Err("Couldn't create config file");
-        }
-    }
-
-    Ok(path)
+pub fn get_config_path() -> Option<PathBuf> {
+    get_config_dir().map(|dir| dir.join("config.toml"))
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct ActivityConfig {
     pub details: Option<String>,
     pub state: Option<String>,
@@ -45,44 +25,65 @@ pub struct ActivityConfig {
     pub small_image_text: Option<String>,
 }
 
-impl Default for ActivityConfig {
-    fn default() -> Self {
-        Self {
-            details: Some("Editing: {filename}".to_string()),
-            state: Some("in {workspace}".to_string()),
-            large_image_key: None,
-            large_image_text: None,
-            small_image_key: None,
-            small_image_text: None,
-        }
-    }
-}
-
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 pub struct Config {
-    pub application_id: u64,
+    #[serde(default)]
+    pub application_id: Option<u64>,
+    #[serde(default)]
     pub activity: Option<ActivityConfig>,
 }
 
 impl Config {
-    pub fn load(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
-        let config_str = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&config_str)?;
-        Ok(config)
+    pub fn load() -> Self {
+        let Some(path) = get_config_path() else {
+            return Self::default();
+        };
+
+        if !path.exists() {
+            return Self::default();
+        }
+
+        let config_str = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to read config file: {}. Using defaults.",
+                    e
+                );
+                return Self::default();
+            }
+        };
+
+        match toml::from_str(&config_str) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to parse config file: {}. Using defaults.",
+                    e
+                );
+                Self::default()
+            }
+        }
+    }
+
+    pub fn get_application_id(&self) -> u64 {
+        self.application_id.unwrap_or(DEFAULT_APPLICATION_ID)
     }
 
     pub fn build_activity(&self, filename: &str, workspace: &str) -> Activity {
         let activity_config = self.activity.clone().unwrap_or_default();
 
-        let details = activity_config.details.map(|s| {
-            s.replace("{filename}", filename)
-                .replace("{workspace}", workspace)
-        });
+        let details = activity_config
+            .details
+            .unwrap_or_else(|| DEFAULT_DETAILS.to_string())
+            .replace("{filename}", filename)
+            .replace("{workspace}", workspace);
 
-        let state = activity_config.state.map(|s| {
-            s.replace("{filename}", filename)
-                .replace("{workspace}", workspace)
-        });
+        let state = activity_config
+            .state
+            .unwrap_or_else(|| DEFAULT_STATE.to_string())
+            .replace("{filename}", filename)
+            .replace("{workspace}", workspace);
 
         let large_image = activity_config.large_image_key.map(|key| {
             let text = activity_config.large_image_text.map(|t| {
@@ -100,15 +101,7 @@ impl Config {
             (key, text)
         });
 
-        let mut builder = Activity::new();
-
-        if let Some(d) = details {
-            builder = builder.details(d);
-        }
-
-        if let Some(s) = state {
-            builder = builder.state(s);
-        }
+        let mut builder = Activity::new().details(details).state(state);
 
         if large_image.is_some() || small_image.is_some() {
             builder = builder.assets(|_| {

@@ -88,22 +88,9 @@ impl Backend {
 
 #[tokio::main]
 async fn main() {
-    let maybe_config = config::ensure_config();
+    let config = Arc::new(Config::load());
 
-    if let Err(e) = maybe_config {
-        eprintln!("{e}");
-    };
-
-    let config_path = maybe_config.unwrap();
-    let config = match Config::load(&config_path) {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            eprintln!("Failed to load config: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    let discord = Arc::new(Mutex::new(DiscordClient::new(config.application_id)));
+    let discord = Arc::new(Mutex::new(DiscordClient::new(config.get_application_id())));
 
     let current_file: Arc<Mutex<Option<FileState>>> = Arc::new(Mutex::new(None));
     let current_file_for_ready = Arc::clone(&current_file);
