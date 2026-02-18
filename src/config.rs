@@ -1,4 +1,4 @@
-use discord_presence::models::rich_presence::{Activity, ActivityAssets};
+use discord_presence::models::rich_presence::{Activity, ActivityAssets, ActivityTimestamps};
 use serde::Deserialize;
 use std::env::home_dir;
 use std::path::PathBuf;
@@ -13,6 +13,14 @@ const DEFAULT_STATE: &str = "in {workspace}";
 
 pub fn get_config_path() -> Option<PathBuf> {
     get_config_dir().map(|dir| dir.join("config.toml"))
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TimeTracking {
+    #[default]
+    File,
+    Workspace,
 }
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -31,6 +39,8 @@ pub struct Config {
     pub application_id: Option<u64>,
     #[serde(default)]
     pub activity: Option<ActivityConfig>,
+    #[serde(default)]
+    pub time_tracking: Option<TimeTracking>,
 }
 
 impl Config {
@@ -70,7 +80,16 @@ impl Config {
         self.application_id.unwrap_or(DEFAULT_APPLICATION_ID)
     }
 
-    pub fn build_activity(&self, filename: &str, workspace: &str) -> Activity {
+    pub fn get_time_tracking(&self) -> TimeTracking {
+        self.time_tracking.unwrap_or_default()
+    }
+
+    pub fn build_activity(
+        &self,
+        filename: &str,
+        workspace: &str,
+        start_timestamp: Option<u64>,
+    ) -> Activity {
         let activity_config = self.activity.clone().unwrap_or_default();
 
         let details = activity_config
@@ -102,6 +121,10 @@ impl Config {
         });
 
         let mut builder = Activity::new().details(details).state(state);
+
+        if let Some(ts) = start_timestamp {
+            builder = builder.timestamps(|_| ActivityTimestamps::new().start(ts));
+        }
 
         if large_image.is_some() || small_image.is_some() {
             builder = builder.assets(|_| {

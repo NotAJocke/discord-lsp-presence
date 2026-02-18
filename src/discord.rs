@@ -11,9 +11,10 @@ pub async fn update_presence(
     config: &Config,
     filename: &str,
     workspace: &str,
+    start_timestamp: Option<u64>,
 ) {
     let mut discord = discord.lock().await;
-    let activity = config.build_activity(filename, workspace);
+    let activity = config.build_activity(filename, workspace, start_timestamp);
 
     match discord.set_activity(|_| activity) {
         Ok(_) => {

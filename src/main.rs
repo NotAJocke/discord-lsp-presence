@@ -11,8 +11,8 @@ mod discord;
 mod state;
 mod workspace;
 
-use config::Config;
-use state::FileState;
+use config::{Config, TimeTracking};
+use state::{FileState, WorkspaceState};
 use workspace::{detect_workspace_name, get_filename_from_uri};
 
 struct Backend {
@@ -20,6 +20,7 @@ struct Backend {
     discord: Arc<Mutex<DiscordClient>>,
     config: Arc<Config>,
     current_file: Arc<Mutex<Option<FileState>>>,
+    current_workspace: Arc<Mutex<Option<WorkspaceState>>>,
 }
 
 #[tower_lsp::async_trait]
@@ -76,11 +77,38 @@ impl Backend {
 
         if let Some(filename) = filename {
             let workspace = workspace_name.unwrap_or_else(|| "unknown workspace".to_string());
-            let state = FileState::new(filename.clone(), workspace.clone());
-            *self.current_file.lock().await = Some(state);
+            
+            let start_timestamp = match self.config.get_time_tracking() {
+                TimeTracking::File => {
+                    let state = FileState::new(filename.clone(), workspace.clone());
+                    let ts = state.get_start_timestamp();
+                    *self.current_file.lock().await = Some(state);
+                    Some(ts)
+                }
+                TimeTracking::Workspace => {
+                    let mut current_workspace = self.current_workspace.lock().await;
+                    let ts = match current_workspace.as_ref() {
+                        Some(ws) if ws.workspace == workspace => ws.get_start_timestamp(),
+                        _ => {
+                            let new_ws = WorkspaceState::new(workspace.clone());
+                            let ts = new_ws.get_start_timestamp();
+                            *current_workspace = Some(new_ws);
+                            ts
+                        }
+                    };
+                    Some(ts)
+                }
+            };
 
             if DiscordClient::is_ready() {
-                discord::update_presence(&self.discord, &self.client, &self.config, &filename, &workspace).await;
+                discord::update_presence(
+                    &self.discord,
+                    &self.client,
+                    &self.config,
+                    &filename,
+                    &workspace,
+                    start_timestamp,
+                ).await;
             }
         }
     }
@@ -93,7 +121,9 @@ async fn main() {
     let discord = Arc::new(Mutex::new(DiscordClient::new(config.get_application_id())));
 
     let current_file: Arc<Mutex<Option<FileState>>> = Arc::new(Mutex::new(None));
+    let current_workspace: Arc<Mutex<Option<WorkspaceState>>> = Arc::new(Mutex::new(None));
     let current_file_for_ready = Arc::clone(&current_file);
+    let current_workspace_for_ready = Arc::clone(&current_workspace);
     let discord_for_ready = Arc::clone(&discord);
     let config_for_ready = Arc::clone(&config);
 
@@ -105,7 +135,17 @@ async fn main() {
             
             if let Some(file_state) = current_file_for_ready.blocking_lock().as_ref() {
                 eprintln!("Setting initial presence for: {}", file_state.filename);
-                let activity = config_for_ready.build_activity(&file_state.filename, &file_state.workspace);
+                let ts = match config_for_ready.get_time_tracking() {
+                    TimeTracking::File => file_state.get_start_timestamp(),
+                    TimeTracking::Workspace => {
+                        current_workspace_for_ready
+                            .blocking_lock()
+                            .as_ref()
+                            .map(|ws| ws.get_start_timestamp())
+                            .unwrap_or_else(|| file_state.get_start_timestamp())
+                    }
+                };
+                let activity = config_for_ready.build_activity(&file_state.filename, &file_state.workspace, Some(ts));
                 let mut client = discord_for_ready.blocking_lock();
                 if let Err(e) = client.set_activity(|_| activity) {
                     eprintln!("Failed to set initial activity: {}", e);
@@ -122,12 +162,14 @@ async fn main() {
     }
 
     let current_file_clone = Arc::clone(&current_file);
+    let current_workspace_clone = Arc::clone(&current_workspace);
     let config_clone = Arc::clone(&config);
     let (service, socket) = LspService::new(move |client| Backend { 
         client, 
         discord: Arc::clone(&discord), 
         config: Arc::clone(&config_clone),
-        current_file: Arc::clone(&current_file_clone) 
+        current_file: Arc::clone(&current_file_clone),
+        current_workspace: Arc::clone(&current_workspace_clone),
     });
 
     let stdin = tokio::io::stdin();
