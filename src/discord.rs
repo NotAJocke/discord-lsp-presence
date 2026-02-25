@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::language::LanguageInfo;
 use discord_presence::Client as DiscordClient;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -11,25 +12,15 @@ pub async fn update_presence(
     config: &Config,
     filename: &str,
     workspace: &str,
+    language: &LanguageInfo,
     start_timestamp: Option<u64>,
 ) {
     let mut discord = discord.lock().await;
-    let activity = config.build_activity(filename, workspace, start_timestamp);
+    let activity = config.build_activity(filename, workspace, language, start_timestamp);
 
     match discord.set_activity(|_| activity) {
         Ok(_) => {
-            let details = config
-                .activity
-                .as_ref()
-                .and_then(|a| a.details.as_ref())
-                .map(|d| d.replace("{filename}", filename).replace("{workspace}", workspace))
-                .unwrap_or_else(|| format!("Editing: {}", filename));
-            let state = config
-                .activity
-                .as_ref()
-                .and_then(|a| a.state.as_ref())
-                .map(|s| s.replace("{filename}", filename).replace("{workspace}", workspace))
-                .unwrap_or_else(|| format!("in {}", workspace));
+            let (details, state) = config.build_details_and_state(filename, workspace, language);
             client
                 .log_message(
                     MessageType::INFO,

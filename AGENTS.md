@@ -13,6 +13,7 @@ The codebase is organized into modular components:
 - **src/config.rs** - Configuration management with optional fields and hardcoded defaults
 - **src/workspace.rs** - Workspace detection (looks for .git directory) and filename extraction from URIs
 - **src/discord.rs** - Discord Rich Presence update helpers
+- **src/language.rs** - Language detection from file extensions and Discord icon key mapping
 
 ## Configuration
 
@@ -26,12 +27,14 @@ Config location: `~/.config/discord-presence-lsp/config.toml`
 |-------|------|---------|-------------|
 | `application_id` | `u64` | `1470506076574187745` | Discord application ID |
 | `time_tracking` | `"file"` or `"workspace"` | `"file"` | How to track elapsed time |
+| `editor_name` | `string` | `"Helix"` | Editor name used in placeholders |
 | `activity.details` | `string` | `"Editing: {filename}"` | Top line in Discord presence |
 | `activity.state` | `string` | `"in {workspace}"` | Bottom line in Discord presence |
-| `activity.large_image_key` | `string` | none | Large image asset name |
-| `activity.large_image_text` | `string` | none | Large image hover text |
-| `activity.small_image_key` | `string` | none | Small image asset name |
-| `activity.small_image_text` | `string` | none | Small image hover text |
+| `activity.editor_image_key` | `string` | none | Large image asset key for editor icon |
+| `activity.editor_image_text` | `string` | none | Large image hover text, supports placeholders |
+| `activity.language_images` | `bool` | `true` | Whether to show detected language icon as small image |
+| `activity.large_image_key` | `string` | none | Legacy fallback for editor large image key |
+| `activity.large_image_text` | `string` | none | Legacy fallback for editor large image text |
 
 ### Time Tracking Modes
 
@@ -45,15 +48,16 @@ application_id = 123456789012345678
 time_tracking = "workspace"
 
 [activity]
-details = "Working on {filename}"
+details = "Working on {filename} ({language})"
 state = "Project: {workspace}"
-large_image_key = "helix"
-large_image_text = "Helix Editor"
+editor_image_key = "helix"
+editor_image_text = "{editor}"
+language_images = true
 ```
 
 ### Placeholders
 
-The `{filename}` and `{workspace}` placeholders can be used in `details`, `state`, and image text fields.
+The `{filename}`, `{workspace}`, `{language}`, and `{editor}` placeholders can be used in `details`, `state`, and image text fields.
 
 ## Features
 
@@ -62,9 +66,19 @@ The `{filename}` and `{workspace}` placeholders can be used in `details`, `state
 - **Immediate Presence**: Sets Discord presence immediately when Helix opens with a file
 - **Time Display**: Shows elapsed time in Discord (configurable: per-file or per-workspace)
 - **Flexible Configuration**: All settings are optional with sensible defaults
+- **Language Detection**: Detects language from file extension and can show language icon as the small image
+- **Editor Icon Support**: Configurable editor icon/text as the large image
 
 ## Current Limitations
 
 - No `did_close` handler yet (presence persists when file is closed)
 - No idle detection (timer keeps running even when not typing)
-- No programming language detection or icons
+
+## Discord Asset Requirements
+
+Upload Discord application assets for any icons you reference:
+
+- Editor icon key used by `activity.editor_image_key` (for example `helix`)
+- Optional language icon keys such as `rust`, `python`, `javascript`, `typescript`, `go`, `java`, `c`, `cpp`, `ruby`, `php`, `html`, `css`, `json`, `markdown`, `toml`, `yaml`, `shell`, `lua`, `kotlin`, `swift`
+
+If a language icon key is not uploaded in Discord, Discord simply omits that small image.

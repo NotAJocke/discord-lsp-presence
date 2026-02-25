@@ -8,10 +8,12 @@ use url::Url;
 
 mod config;
 mod discord;
+mod language;
 mod state;
 mod workspace;
 
 use config::{Config, TimeTracking};
+use language::detect_language;
 use state::{FileState, WorkspaceState};
 use workspace::{detect_workspace_name, get_filename_from_uri};
 
@@ -77,7 +79,8 @@ impl Backend {
 
         if let Some(filename) = filename {
             let workspace = workspace_name.unwrap_or_else(|| "unknown workspace".to_string());
-            
+            let language = detect_language(&filename);
+
             let start_timestamp = match self.config.get_time_tracking() {
                 TimeTracking::File => {
                     let state = FileState::new(filename.clone(), workspace.clone());
@@ -107,8 +110,10 @@ impl Backend {
                     &self.config,
                     &filename,
                     &workspace,
+                    &language,
                     start_timestamp,
-                ).await;
+                )
+                .await;
             }
         }
     }
@@ -132,20 +137,24 @@ async fn main() {
 
         drpc.on_ready(move |_ctx| {
             eprintln!("Discord client ready");
-            
+
             if let Some(file_state) = current_file_for_ready.blocking_lock().as_ref() {
                 eprintln!("Setting initial presence for: {}", file_state.filename);
                 let ts = match config_for_ready.get_time_tracking() {
                     TimeTracking::File => file_state.get_start_timestamp(),
-                    TimeTracking::Workspace => {
-                        current_workspace_for_ready
-                            .blocking_lock()
-                            .as_ref()
-                            .map(|ws| ws.get_start_timestamp())
-                            .unwrap_or_else(|| file_state.get_start_timestamp())
-                    }
+                    TimeTracking::Workspace => current_workspace_for_ready
+                        .blocking_lock()
+                        .as_ref()
+                        .map(|ws| ws.get_start_timestamp())
+                        .unwrap_or_else(|| file_state.get_start_timestamp()),
                 };
-                let activity = config_for_ready.build_activity(&file_state.filename, &file_state.workspace, Some(ts));
+                let language = detect_language(&file_state.filename);
+                let activity = config_for_ready.build_activity(
+                    &file_state.filename,
+                    &file_state.workspace,
+                    &language,
+                    Some(ts),
+                );
                 let mut client = discord_for_ready.blocking_lock();
                 if let Err(e) = client.set_activity(|_| activity) {
                     eprintln!("Failed to set initial activity: {}", e);
@@ -164,9 +173,9 @@ async fn main() {
     let current_file_clone = Arc::clone(&current_file);
     let current_workspace_clone = Arc::clone(&current_workspace);
     let config_clone = Arc::clone(&config);
-    let (service, socket) = LspService::new(move |client| Backend { 
-        client, 
-        discord: Arc::clone(&discord), 
+    let (service, socket) = LspService::new(move |client| Backend {
+        client,
+        discord: Arc::clone(&discord),
         config: Arc::clone(&config_clone),
         current_file: Arc::clone(&current_file_clone),
         current_workspace: Arc::clone(&current_workspace_clone),

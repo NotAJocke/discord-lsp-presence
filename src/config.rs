@@ -3,6 +3,8 @@ use serde::Deserialize;
 use std::env::home_dir;
 use std::path::PathBuf;
 
+use crate::language::LanguageInfo;
+
 pub fn get_config_dir() -> Option<PathBuf> {
     home_dir().map(|home| home.join(".config").join("discord-presence-lsp"))
 }
@@ -10,6 +12,7 @@ pub fn get_config_dir() -> Option<PathBuf> {
 const DEFAULT_APPLICATION_ID: u64 = 1470506076574187745;
 const DEFAULT_DETAILS: &str = "Editing: {filename}";
 const DEFAULT_STATE: &str = "in {workspace}";
+const DEFAULT_EDITOR_NAME: &str = "Helix";
 
 pub fn get_config_path() -> Option<PathBuf> {
     get_config_dir().map(|dir| dir.join("config.toml"))
@@ -29,8 +32,9 @@ pub struct ActivityConfig {
     pub state: Option<String>,
     pub large_image_key: Option<String>,
     pub large_image_text: Option<String>,
-    pub small_image_key: Option<String>,
-    pub small_image_text: Option<String>,
+    pub editor_image_key: Option<String>,
+    pub editor_image_text: Option<String>,
+    pub language_images: Option<bool>,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -41,6 +45,8 @@ pub struct Config {
     pub activity: Option<ActivityConfig>,
     #[serde(default)]
     pub time_tracking: Option<TimeTracking>,
+    #[serde(default)]
+    pub editor_name: Option<String>,
 }
 
 impl Config {
@@ -84,41 +90,69 @@ impl Config {
         self.time_tracking.unwrap_or_default()
     }
 
+    pub fn get_editor_name(&self) -> &str {
+        self.editor_name.as_deref().unwrap_or(DEFAULT_EDITOR_NAME)
+    }
+
+    pub fn show_language_images(&self) -> bool {
+        self.activity
+            .as_ref()
+            .and_then(|a| a.language_images)
+            .unwrap_or(true)
+    }
+
+    pub fn build_details_and_state(
+        &self,
+        filename: &str,
+        workspace: &str,
+        language: &LanguageInfo,
+    ) -> (String, String) {
+        let activity_config = self.activity.clone().unwrap_or_default();
+        let editor_name = self.get_editor_name();
+        let details_template = activity_config
+            .details
+            .unwrap_or_else(|| DEFAULT_DETAILS.to_string());
+        let state_template = activity_config
+            .state
+            .unwrap_or_else(|| DEFAULT_STATE.to_string());
+
+        let details = replace_placeholders(
+            &details_template,
+            filename,
+            workspace,
+            language,
+            editor_name,
+        );
+        let state =
+            replace_placeholders(&state_template, filename, workspace, language, editor_name);
+        (details, state)
+    }
+
     pub fn build_activity(
         &self,
         filename: &str,
         workspace: &str,
+        language: &LanguageInfo,
         start_timestamp: Option<u64>,
     ) -> Activity {
         let activity_config = self.activity.clone().unwrap_or_default();
+        let editor_name = self.get_editor_name();
+        let (details, state) = self.build_details_and_state(filename, workspace, language);
 
-        let details = activity_config
-            .details
-            .unwrap_or_else(|| DEFAULT_DETAILS.to_string())
-            .replace("{filename}", filename)
-            .replace("{workspace}", workspace);
+        let large_image_key = activity_config
+            .editor_image_key
+            .or(activity_config.large_image_key);
+        let large_image_text = activity_config
+            .editor_image_text
+            .or(activity_config.large_image_text)
+            .map(|text| replace_placeholders(&text, filename, workspace, language, editor_name));
 
-        let state = activity_config
-            .state
-            .unwrap_or_else(|| DEFAULT_STATE.to_string())
-            .replace("{filename}", filename)
-            .replace("{workspace}", workspace);
-
-        let large_image = activity_config.large_image_key.map(|key| {
-            let text = activity_config.large_image_text.map(|t| {
-                t.replace("{filename}", filename)
-                    .replace("{workspace}", workspace)
-            });
-            (key, text)
-        });
-
-        let small_image = activity_config.small_image_key.map(|key| {
-            let text = activity_config.small_image_text.map(|t| {
-                t.replace("{filename}", filename)
-                    .replace("{workspace}", workspace)
-            });
-            (key, text)
-        });
+        let small_image_key = if self.show_language_images() && !language.icon_key.is_empty() {
+            Some(language.icon_key.clone())
+        } else {
+            None
+        };
+        let small_image_text = small_image_key.as_ref().map(|_| language.name.clone());
 
         let mut builder = Activity::new().details(details).state(state);
 
@@ -126,18 +160,18 @@ impl Config {
             builder = builder.timestamps(|_| ActivityTimestamps::new().start(ts));
         }
 
-        if large_image.is_some() || small_image.is_some() {
+        if large_image_key.is_some() || small_image_key.is_some() {
             builder = builder.assets(|_| {
                 let mut assets = ActivityAssets::new();
-                if let Some((key, text)) = large_image {
+                if let Some(key) = large_image_key {
                     assets = assets.large_image(key);
-                    if let Some(t) = text {
+                    if let Some(t) = large_image_text {
                         assets = assets.large_text(t);
                     }
                 }
-                if let Some((key, text)) = small_image {
+                if let Some(key) = small_image_key {
                     assets = assets.small_image(key);
-                    if let Some(t) = text {
+                    if let Some(t) = small_image_text {
                         assets = assets.small_text(t);
                     }
                 }
@@ -147,4 +181,17 @@ impl Config {
 
         builder
     }
+}
+
+fn replace_placeholders(
+    text: &str,
+    filename: &str,
+    workspace: &str,
+    language: &LanguageInfo,
+    editor: &str,
+) -> String {
+    text.replace("{filename}", filename)
+        .replace("{workspace}", workspace)
+        .replace("{language}", &language.name)
+        .replace("{editor}", editor)
 }
