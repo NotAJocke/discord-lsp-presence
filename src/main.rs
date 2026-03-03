@@ -23,6 +23,7 @@ struct Backend {
     config: Arc<Config>,
     current_file: Arc<Mutex<Option<FileState>>>,
     current_workspace: Arc<Mutex<Option<WorkspaceState>>>,
+    enabled: Arc<Mutex<bool>>,
 }
 
 #[tower_lsp::async_trait]
@@ -37,6 +38,14 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec![
+                        "discord-presence.enable".to_string(),
+                        "discord-presence.disable".to_string(),
+                        "discord-presence.toggle".to_string(),
+                    ],
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
         })
@@ -70,10 +79,94 @@ impl LanguageServer for Backend {
 
         self.handle_file_event(&params.text_document.uri).await;
     }
+
+    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
+        let command = params.command.as_str();
+
+        match command {
+            "discord-presence.enable" => {
+                let mut enabled = self.enabled.lock().await;
+                if !*enabled {
+                    *enabled = true;
+                    self.client.log_message(MessageType::INFO, "Discord presence enabled.").await;
+
+                    if let Some(file_state) = self.current_file.lock().await.as_ref() {
+                        let language = detect_language(&file_state.filename);
+                        let ts = match self.config.get_time_tracking() {
+                            TimeTracking::File => file_state.get_start_timestamp(),
+                            TimeTracking::Workspace => self.current_workspace.lock().await
+                                .as_ref()
+                                .map(|ws| ws.get_start_timestamp())
+                                .unwrap_or_else(|| file_state.get_start_timestamp()),
+                        };
+                        discord::update_presence(
+                            &self.discord,
+                            &self.client,
+                            &self.config,
+                            &file_state.filename,
+                            &file_state.workspace,
+                            &language,
+                            Some(ts),
+                        ).await;
+                    }
+                } else {
+                    self.client.log_message(MessageType::INFO, "Discord presence is already enabled.").await;
+                }
+            }
+            "discord-presence.disable" => {
+                let mut enabled = self.enabled.lock().await;
+                if *enabled {
+                    *enabled = false;
+                    self.client.log_message(MessageType::INFO, "Discord presence disabled.").await;
+                    discord::clear_presence(&self.discord, &self.client).await;
+                } else {
+                    self.client.log_message(MessageType::INFO, "Discord presence is already disabled.").await;
+                }
+            }
+            "discord-presence.toggle" => {
+                let mut enabled = self.enabled.lock().await;
+                *enabled = !*enabled;
+
+                if *enabled {
+                    self.client.log_message(MessageType::INFO, "Discord presence enabled.").await;
+
+                    if let Some(file_state) = self.current_file.lock().await.as_ref() {
+                        let language = detect_language(&file_state.filename);
+                        let ts = match self.config.get_time_tracking() {
+                            TimeTracking::File => file_state.get_start_timestamp(),
+                            TimeTracking::Workspace => self.current_workspace.lock().await
+                                .as_ref()
+                                .map(|ws| ws.get_start_timestamp())
+                                .unwrap_or_else(|| file_state.get_start_timestamp()),
+                        };
+                        discord::update_presence(
+                            &self.discord,
+                            &self.client,
+                            &self.config,
+                            &file_state.filename,
+                            &file_state.workspace,
+                            &language,
+                            Some(ts),
+                        ).await;
+                    }
+                } else {
+                    self.client.log_message(MessageType::INFO, "Discord presence disabled.").await;
+                    discord::clear_presence(&self.discord, &self.client).await;
+                }
+            }
+            _ => {}
+        }
+
+        Ok(None)
+    }
 }
 
 impl Backend {
     async fn handle_file_event(&self, uri: &Url) {
+        if !*self.enabled.lock().await {
+            return;
+        }
+
         let filename = get_filename_from_uri(uri);
         let workspace_name = detect_workspace_name(uri);
 
@@ -127,16 +220,23 @@ async fn main() {
 
     let current_file: Arc<Mutex<Option<FileState>>> = Arc::new(Mutex::new(None));
     let current_workspace: Arc<Mutex<Option<WorkspaceState>>> = Arc::new(Mutex::new(None));
+    let enabled: Arc<Mutex<bool>> = Arc::new(Mutex::new(config.is_enabled()));
     let current_file_for_ready = Arc::clone(&current_file);
     let current_workspace_for_ready = Arc::clone(&current_workspace);
     let discord_for_ready = Arc::clone(&discord);
     let config_for_ready = Arc::clone(&config);
+    let enabled_for_ready = Arc::clone(&enabled);
 
     {
         let drpc = discord.lock().await;
 
         drpc.on_ready(move |_ctx| {
             eprintln!("Discord client ready");
+
+            if !*enabled_for_ready.blocking_lock() {
+                eprintln!("Discord presence is disabled, skipping initial presence.");
+                return;
+            }
 
             if let Some(file_state) = current_file_for_ready.blocking_lock().as_ref() {
                 eprintln!("Setting initial presence for: {}", file_state.filename);
@@ -173,12 +273,14 @@ async fn main() {
     let current_file_clone = Arc::clone(&current_file);
     let current_workspace_clone = Arc::clone(&current_workspace);
     let config_clone = Arc::clone(&config);
+    let enabled_clone = Arc::clone(&enabled);
     let (service, socket) = LspService::new(move |client| Backend {
         client,
         discord: Arc::clone(&discord),
         config: Arc::clone(&config_clone),
         current_file: Arc::clone(&current_file_clone),
         current_workspace: Arc::clone(&current_workspace_clone),
+        enabled: Arc::clone(&enabled_clone),
     });
 
     let stdin = tokio::io::stdin();

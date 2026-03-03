@@ -106,6 +106,7 @@ version = "0.1.0"
 dependencies = [
  "discord-presence",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
  "tower-lsp",

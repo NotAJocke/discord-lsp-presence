@@ -38,3 +38,23 @@ pub async fn update_presence(
         }
     }
 }
+
+pub async fn clear_presence(
+    discord: &Arc<Mutex<DiscordClient>>,
+    client: &Client,
+) {
+    let mut discord = discord.lock().await;
+
+    match discord.clear_activity() {
+        Ok(_) => {
+            client
+                .log_message(MessageType::INFO, "Discord presence cleared.")
+                .await;
+        }
+        Err(e) => {
+            client
+                .log_message(MessageType::ERROR, &format!("Failed to clear presence: {}", e))
+                .await;
+        }
+    }
+}

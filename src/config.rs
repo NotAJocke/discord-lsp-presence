@@ -47,6 +47,8 @@ pub struct Config {
     pub time_tracking: Option<TimeTracking>,
     #[serde(default)]
     pub editor_name: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
 }
 
 impl Config {
@@ -99,6 +101,10 @@ impl Config {
             .as_ref()
             .and_then(|a| a.language_images)
             .unwrap_or(true)
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
     }
 
     pub fn build_details_and_state(
