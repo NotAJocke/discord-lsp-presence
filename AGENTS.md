@@ -33,6 +33,7 @@ Config location: `~/.config/discord-presence-lsp/config.toml`
 | `activity.editor_image_key` | `string` | none | Large image asset key for editor icon |
 | `activity.editor_image_text` | `string` | none | Large image hover text, supports placeholders |
 | `activity.language_images` | `bool` | `true` | Whether to show detected language icon as small image |
+| `activity.button_label` | `string` | `"View Repository"` | Button label (only shown if git remote URL is detected) |
 | `activity.large_image_key` | `string` | none | Legacy fallback for editor large image key |
 | `activity.large_image_text` | `string` | none | Legacy fallback for editor large image text |
 
@@ -61,18 +62,21 @@ The `{filename}`, `{workspace}`, `{language}`, and `{editor}` placeholders can b
 
 ## Features
 
-- **Workspace Detection**: Automatically detects the project/workspace name by walking up the directory tree looking for a `.git` folder, falling back to the immediate parent directory
+- **Workspace Detection**: Automatically detects the project/workspace name by walking up the directory tree looking for a `.git` or `.jj` folder, falling back to the immediate parent directory
 - **File Tracking**: Tracks the currently open file and workspace with timestamps
 - **Immediate Presence**: Sets Discord presence immediately when Helix opens with a file
 - **Time Display**: Shows elapsed time in Discord (configurable: per-file or per-workspace)
 - **Flexible Configuration**: All settings are optional with sensible defaults
 - **Language Detection**: Detects language from file extension and can show language icon as the small image
 - **Editor Icon Support**: Configurable editor icon/text as the large image
+- **View Repository Button**: Shows a clickable "View Repository" button when a git remote URL is detected (works with both Git and Jujutsu/JJ repositories)
+- **Git/Jujutsu Support**: Detects both Git (`.git/`) and Jujutsu (`.jj/`) repositories
 
 ## Current Limitations
 
 - No `did_close` handler yet (presence persists when file is closed)
 - No idle detection (timer keeps running even when not typing)
+- Buttons are not visible to the user who set the presence (Discord limitation - other users can see them)
 
 ## Discord Asset Requirements
 

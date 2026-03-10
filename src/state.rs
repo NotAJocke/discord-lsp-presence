@@ -4,14 +4,16 @@ pub struct FileState {
     pub filename: String,
     pub workspace: String,
     pub start_time: Instant,
+    pub git_remote_url: Option<String>,
 }
 
 impl FileState {
-    pub fn new(filename: String, workspace: String) -> Self {
+    pub fn new(filename: String, workspace: String, git_remote_url: Option<String>) -> Self {
         Self {
             filename,
             workspace,
             start_time: Instant::now(),
+            git_remote_url,
         }
     }
 

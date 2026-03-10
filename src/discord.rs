@@ -14,9 +14,10 @@ pub async fn update_presence(
     workspace: &str,
     language: &LanguageInfo,
     start_timestamp: Option<u64>,
+    git_remote_url: Option<&str>,
 ) {
     let mut discord = discord.lock().await;
-    let activity = config.build_activity(filename, workspace, language, start_timestamp);
+    let activity = config.build_activity(filename, workspace, language, start_timestamp, git_remote_url);
 
     match discord.set_activity(|_| activity) {
         Ok(_) => {
