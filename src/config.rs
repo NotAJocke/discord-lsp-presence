@@ -1,4 +1,6 @@
-use discord_presence::models::rich_presence::{Activity, ActivityAssets, ActivityTimestamps};
+use discord_presence::models::rich_presence::{
+    Activity, ActivityAssets, ActivityButton, ActivityTimestamps,
+};
 use serde::Deserialize;
 use std::env::home_dir;
 use std::path::PathBuf;
@@ -35,6 +37,7 @@ pub struct ActivityConfig {
     pub editor_image_key: Option<String>,
     pub editor_image_text: Option<String>,
     pub language_images: Option<bool>,
+    pub button_label: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -140,6 +143,7 @@ impl Config {
         workspace: &str,
         language: &LanguageInfo,
         start_timestamp: Option<u64>,
+        git_remote_url: Option<&str>,
     ) -> Activity {
         let activity_config = self.activity.clone().unwrap_or_default();
         let editor_name = self.get_editor_name();
@@ -182,6 +186,17 @@ impl Config {
                     }
                 }
                 assets
+            });
+        }
+
+        if let Some(remote_url) = git_remote_url {
+            let button_label = activity_config
+                .button_label
+                .unwrap_or_else(|| "View Repository".to_string());
+            builder = builder.append_buttons(|_| {
+                ActivityButton::new()
+                    .label(button_label)
+                    .url(remote_url.to_string())
             });
         }
 

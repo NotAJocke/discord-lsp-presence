@@ -15,7 +15,7 @@ mod workspace;
 use config::{Config, TimeTracking};
 use language::detect_language;
 use state::{FileState, WorkspaceState};
-use workspace::{detect_workspace_name, get_filename_from_uri};
+use workspace::{detect_workspace_name, get_filename_from_uri, is_git_repo, get_git_remote_url};
 
 struct Backend {
     client: Client,
@@ -107,6 +107,7 @@ impl LanguageServer for Backend {
                             &file_state.workspace,
                             &language,
                             Some(ts),
+                            file_state.git_remote_url.as_deref(),
                         ).await;
                     }
                 } else {
@@ -147,6 +148,7 @@ impl LanguageServer for Backend {
                             &file_state.workspace,
                             &language,
                             Some(ts),
+                            file_state.git_remote_url.as_deref(),
                         ).await;
                     }
                 } else {
@@ -169,6 +171,12 @@ impl Backend {
 
         let filename = get_filename_from_uri(uri);
         let workspace_name = detect_workspace_name(uri);
+        let git_repo = is_git_repo(uri);
+        let git_remote_url = if git_repo {
+            get_git_remote_url(uri)
+        } else {
+            None
+        };
 
         if let Some(filename) = filename {
             let workspace = workspace_name.unwrap_or_else(|| "unknown workspace".to_string());
@@ -176,7 +184,11 @@ impl Backend {
 
             let start_timestamp = match self.config.get_time_tracking() {
                 TimeTracking::File => {
-                    let state = FileState::new(filename.clone(), workspace.clone());
+                    let state = FileState::new(
+                        filename.clone(),
+                        workspace.clone(),
+                        git_remote_url.clone(),
+                    );
                     let ts = state.get_start_timestamp();
                     *self.current_file.lock().await = Some(state);
                     Some(ts)
@@ -205,6 +217,7 @@ impl Backend {
                     &workspace,
                     &language,
                     start_timestamp,
+                    git_remote_url.as_deref(),
                 )
                 .await;
             }
@@ -254,6 +267,7 @@ async fn main() {
                     &file_state.workspace,
                     &language,
                     Some(ts),
+                    file_state.git_remote_url.as_deref(),
                 );
                 let mut client = discord_for_ready.blocking_lock();
                 if let Err(e) = client.set_activity(|_| activity) {

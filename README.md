@@ -65,8 +65,10 @@ large_image_text = "Helix Editor"
 | `activity.state` | `string` | `"in {workspace}"` | Bottom line |
 | `activity.large_image_key` | `string` | none | Large image asset |
 | `activity.large_image_text` | `string` | none | Large image text |
-| `activity.small_image_key` | `string` | none | Small image asset |
+| `activity.small_image_key` | `string` | none | Small image asset (language icon) |
 | `activity.small_image_text` | `string` | none | Small image text |
+| `activity.language_images` | `bool` | `true` | Show language icon as small image |
+| `activity.button_label` | `string` | `"View Repository"` | Button label (requires git remote) |
 
 #### Time Tracking
 
@@ -75,20 +77,23 @@ large_image_text = "Helix Editor"
 
 #### Placeholders
 
-Use `{filename}` and `{workspace}` in text fields.
+Use `{filename}`, `{workspace}`, `{language}`, and `{editor}` in text fields.
 
 ## Features
 
-- Automatic workspace detection via `.git` directory
+- Automatic workspace detection via `.git` or `.jj` directory
 - Shows elapsed time in Discord
 - Configurable presence text
+- Language-specific icons
+- "View Repository" button (when git remote is detected)
+- Supports both Git and Jujutsu (JJ) repositories
 - No config file required
 
 ## Limitations
 
 - No idle detection
 - No `did_close` handling
-- No language-specific icons
+- Buttons are not visible to the user who set the presence (other users can see them)
 
 ## License
 
