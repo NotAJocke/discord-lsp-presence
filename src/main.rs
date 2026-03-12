@@ -6,12 +6,14 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use url::Url;
 
+mod activity;
 mod config;
 mod discord;
 mod language;
 mod state;
 mod workspace;
 
+use activity::build_activity;
 use config::{Config, TimeTracking};
 use language::detect_language;
 use state::{FileState, WorkspaceState};
@@ -262,7 +264,8 @@ async fn main() {
                         .unwrap_or_else(|| file_state.get_start_timestamp()),
                 };
                 let language = detect_language(&file_state.filename);
-                let activity = config_for_ready.build_activity(
+                let activity = build_activity(
+                    &config_for_ready,
                     &file_state.filename,
                     &file_state.workspace,
                     &language,

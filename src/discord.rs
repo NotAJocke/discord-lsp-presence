@@ -1,3 +1,4 @@
+use crate::activity::{build_activity, build_details_and_state};
 use crate::config::Config;
 use crate::language::LanguageInfo;
 use discord_presence::Client as DiscordClient;
@@ -17,11 +18,11 @@ pub async fn update_presence(
     git_remote_url: Option<&str>,
 ) {
     let mut discord = discord.lock().await;
-    let activity = config.build_activity(filename, workspace, language, start_timestamp, git_remote_url);
+    let activity = build_activity(config, filename, workspace, language, start_timestamp, git_remote_url);
 
     match discord.set_activity(|_| activity) {
         Ok(_) => {
-            let (details, state) = config.build_details_and_state(filename, workspace, language);
+            let (details, state) = build_details_and_state(config, filename, workspace, language);
             client
                 .log_message(
                     MessageType::INFO,

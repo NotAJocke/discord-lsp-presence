@@ -116,7 +116,7 @@ fn parse_git_remote(git_config_path: &PathBuf) -> Result<String, std::io::Error>
         let line = line.trim();
 
         if line.starts_with('[') {
-            in_remote_origin = line == "[remote \"origin\"]" || line == "[remote \"origin\"]";
+            in_remote_origin = line == "[remote \"origin\"]";
             continue;
         }
 
