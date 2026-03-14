@@ -1,4 +1,6 @@
+use clap::Parser;
 use discord_presence::Client as DiscordClient;
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -9,20 +11,65 @@ use url::Url;
 mod activity;
 mod config;
 mod discord;
+mod editor;
 mod language;
 mod state;
 mod workspace;
 
 use activity::build_activity;
 use config::{Config, TimeTracking};
+use editor::{detect_editor, EditorInfo};
 use language::detect_language;
 use state::{FileState, WorkspaceState};
 use workspace::{detect_workspace_name, get_filename_from_uri, is_git_repo, get_git_remote_url};
+
+fn extract_editor_from_init_options(params: &InitializeParams) -> Option<String> {
+    let init_options = params.initialization_options.as_ref()?;
+    
+    if let Some(editor) = init_options.get("editor").and_then(|v| v.as_str()) {
+        return Some(editor.to_string());
+    }
+    
+    if let Some(name) = init_options.get("name").and_then(|v| v.as_str()) {
+        return Some(name.to_string());
+    }
+    
+    None
+}
+
+fn extract_editor_from_client_info(params: &InitializeParams) -> Option<String> {
+    params.client_info.as_ref().map(|ci| ci.name.clone())
+}
+
+fn determine_editor_name(params: &InitializeParams, cli_editor: Option<String>) -> String {
+    if let Some(editor) = cli_editor {
+        return editor;
+    }
+    
+    if let Some(editor) = extract_editor_from_init_options(params) {
+        return editor;
+    }
+    
+    if let Some(editor) = extract_editor_from_client_info(params) {
+        return editor;
+    }
+    
+    "Unknown Editor".to_string()
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "discord-lsp-presence")]
+#[command(about = "Discord Rich Presence for LSP editors", long_about = None)]
+struct Args {
+    #[arg(long)]
+    editor: Option<String>,
+}
 
 struct Backend {
     client: Client,
     discord: Arc<Mutex<DiscordClient>>,
     config: Arc<Config>,
+    editor: Arc<Mutex<EditorInfo>>,
     current_file: Arc<Mutex<Option<FileState>>>,
     current_workspace: Arc<Mutex<Option<WorkspaceState>>>,
     enabled: Arc<Mutex<bool>>,
@@ -30,7 +77,14 @@ struct Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let cli_editor = Args::parse().editor;
+        let editor_name = determine_editor_name(&params, cli_editor);
+        let editor = detect_editor(&editor_name);
+        *self.editor.lock().await = editor.clone();
+        
+        eprintln!("Detected editor: {} (icon: {})", editor.name, if editor.icon_key.is_empty() { "none" } else { &editor.icon_key });
+        
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "discord-lsp-presence".to_string(),
@@ -110,6 +164,7 @@ impl LanguageServer for Backend {
                             &language,
                             Some(ts),
                             file_state.git_remote_url.as_deref(),
+                            self.editor.lock().await.deref(),
                         ).await;
                     }
                 } else {
@@ -151,6 +206,7 @@ impl LanguageServer for Backend {
                             &language,
                             Some(ts),
                             file_state.git_remote_url.as_deref(),
+                            self.editor.lock().await.deref(),
                         ).await;
                     }
                 } else {
@@ -220,6 +276,7 @@ impl Backend {
                     &language,
                     start_timestamp,
                     git_remote_url.as_deref(),
+                    self.editor.lock().await.deref(),
                 )
                 .await;
             }
@@ -236,11 +293,13 @@ async fn main() {
     let current_file: Arc<Mutex<Option<FileState>>> = Arc::new(Mutex::new(None));
     let current_workspace: Arc<Mutex<Option<WorkspaceState>>> = Arc::new(Mutex::new(None));
     let enabled: Arc<Mutex<bool>> = Arc::new(Mutex::new(config.is_enabled()));
+    let editor: Arc<Mutex<EditorInfo>> = Arc::new(Mutex::new(EditorInfo::default()));
     let current_file_for_ready = Arc::clone(&current_file);
     let current_workspace_for_ready = Arc::clone(&current_workspace);
     let discord_for_ready = Arc::clone(&discord);
     let config_for_ready = Arc::clone(&config);
     let enabled_for_ready = Arc::clone(&enabled);
+    let editor_for_ready = Arc::clone(&editor);
 
     {
         let drpc = discord.lock().await;
@@ -264,6 +323,7 @@ async fn main() {
                         .unwrap_or_else(|| file_state.get_start_timestamp()),
                 };
                 let language = detect_language(&file_state.filename);
+                let editor = editor_for_ready.blocking_lock().clone();
                 let activity = build_activity(
                     &config_for_ready,
                     &file_state.filename,
@@ -271,6 +331,7 @@ async fn main() {
                     &language,
                     Some(ts),
                     file_state.git_remote_url.as_deref(),
+                    &editor,
                 );
                 let mut client = discord_for_ready.blocking_lock();
                 if let Err(e) = client.set_activity(|_| activity) {
@@ -291,10 +352,12 @@ async fn main() {
     let current_workspace_clone = Arc::clone(&current_workspace);
     let config_clone = Arc::clone(&config);
     let enabled_clone = Arc::clone(&enabled);
+    let editor_clone = Arc::clone(&editor);
     let (service, socket) = LspService::new(move |client| Backend {
         client,
         discord: Arc::clone(&discord),
         config: Arc::clone(&config_clone),
+        editor: Arc::clone(&editor_clone),
         current_file: Arc::clone(&current_file_clone),
         current_workspace: Arc::clone(&current_workspace_clone),
         enabled: Arc::clone(&enabled_clone),

@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::editor::EditorInfo;
 use crate::language::LanguageInfo;
 use discord_presence::models::rich_presence::{
     Activity, ActivityAssets, ActivityButton, ActivityTimestamps,
@@ -11,18 +12,34 @@ pub fn build_activity(
     language: &LanguageInfo,
     start_timestamp: Option<u64>,
     git_remote_url: Option<&str>,
+    editor: &EditorInfo,
 ) -> Activity {
     let activity_config = config.activity.clone().unwrap_or_default();
-    let editor_name = config.get_editor_name();
-    let (details, state) = build_details_and_state(config, filename, workspace, language);
+    let (details, state) =
+        build_details_and_state(config, filename, workspace, language, &editor.name);
 
     let large_image_key = activity_config
         .editor_image_key
-        .or(activity_config.large_image_key);
-    let large_image_text = activity_config
-        .editor_image_text
-        .or(activity_config.large_image_text)
-        .map(|text| replace_placeholders(&text, filename, workspace, language, editor_name));
+        .or(activity_config.large_image_key)
+        .or_else(|| {
+            if !editor.icon_key.is_empty() {
+                Some(editor.icon_key.clone())
+            } else {
+                None
+            }
+        });
+
+    let config_has_text =
+        activity_config.editor_image_text.is_some() || activity_config.large_image_text.is_some();
+
+    let large_image_text = if !config_has_text && !editor.icon_key.is_empty() {
+        Some(editor.name.clone())
+    } else {
+        activity_config
+            .editor_image_text
+            .or(activity_config.large_image_text)
+            .map(|text| replace_placeholders(&text, filename, workspace, language, &editor.name))
+    };
 
     let small_image_key = if config.show_language_images() && !language.icon_key.is_empty() {
         Some(language.icon_key.clone())
@@ -75,9 +92,9 @@ pub fn build_details_and_state(
     filename: &str,
     workspace: &str,
     language: &LanguageInfo,
+    editor_name: &str,
 ) -> (String, String) {
     let activity_config = config.activity.clone().unwrap_or_default();
-    let editor_name = config.get_editor_name();
 
     let details_template = activity_config
         .details

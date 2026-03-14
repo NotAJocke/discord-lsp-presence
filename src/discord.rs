@@ -1,5 +1,6 @@
 use crate::activity::{build_activity, build_details_and_state};
 use crate::config::Config;
+use crate::editor::EditorInfo;
 use crate::language::LanguageInfo;
 use discord_presence::Client as DiscordClient;
 use std::sync::Arc;
@@ -16,13 +17,14 @@ pub async fn update_presence(
     language: &LanguageInfo,
     start_timestamp: Option<u64>,
     git_remote_url: Option<&str>,
+    editor: &EditorInfo,
 ) {
     let mut discord = discord.lock().await;
-    let activity = build_activity(config, filename, workspace, language, start_timestamp, git_remote_url);
+    let activity = build_activity(config, filename, workspace, language, start_timestamp, git_remote_url, editor);
 
     match discord.set_activity(|_| activity) {
         Ok(_) => {
-            let (details, state) = build_details_and_state(config, filename, workspace, language);
+            let (details, state) = build_details_and_state(config, filename, workspace, language, &editor.name);
             client
                 .log_message(
                     MessageType::INFO,

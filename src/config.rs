@@ -9,7 +9,6 @@ pub fn get_config_dir() -> Option<PathBuf> {
 pub const DEFAULT_APPLICATION_ID: u64 = 1470506076574187745;
 pub const DEFAULT_DETAILS: &str = "Editing: {filename}";
 pub const DEFAULT_STATE: &str = "in {workspace}";
-const DEFAULT_EDITOR_NAME: &str = "Helix";
 
 pub fn get_config_path() -> Option<PathBuf> {
     get_config_dir().map(|dir| dir.join("config.toml"))
@@ -43,8 +42,6 @@ pub struct Config {
     pub activity: Option<ActivityConfig>,
     #[serde(default)]
     pub time_tracking: Option<TimeTracking>,
-    #[serde(default)]
-    pub editor_name: Option<String>,
     #[serde(default)]
     pub enabled: Option<bool>,
 }
@@ -88,10 +85,6 @@ impl Config {
 
     pub fn get_time_tracking(&self) -> TimeTracking {
         self.time_tracking.unwrap_or_default()
-    }
-
-    pub fn get_editor_name(&self) -> &str {
-        self.editor_name.as_deref().unwrap_or(DEFAULT_EDITOR_NAME)
     }
 
     pub fn show_language_images(&self) -> bool {

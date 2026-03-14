@@ -1,8 +1,8 @@
-This project adds Discord Rich Presence support to the Helix editor by running a small, standalone Language Server written in Rust. The server uses the tower-lsp crate to communicate with Helix through the Language Server Protocol and listens to standard editor events such as opening and changing documents.
+This project adds Discord Rich Presence support to LSP-compatible editors by running a small, standalone Language Server written in Rust. The server uses the tower-lsp crate to communicate with the editor through the Language Server Protocol and listens to standard editor events such as opening and changing documents.
 
 Based on these LSP events, the server infers the current editing context, including the active file and the workspace. It then publishes this information to Discord using the discord-presence crate, which communicates with the locally running Discord client via IPC.
 
-The language server does not implement any language features like diagnostics, code completion, or formatting. It exists solely as an integration layer between Helix and Discord and remains active for the duration of the editor session. Because Helix does not support extensions, using an LSP server allows this integration without modifying Helix itself or replacing its built-in language servers.
+The language server does not implement any language features like diagnostics, code completion, or formatting. It exists solely as an integration layer between the editor and Discord and remains active for the duration of the editor session.
 
 ## Architecture
 
@@ -27,7 +27,6 @@ Config location: `~/.config/discord-presence-lsp/config.toml`
 |-------|------|---------|-------------|
 | `application_id` | `u64` | `1470506076574187745` | Discord application ID |
 | `time_tracking` | `"file"` or `"workspace"` | `"file"` | How to track elapsed time |
-| `editor_name` | `string` | `"Helix"` | Editor name used in placeholders |
 | `activity.details` | `string` | `"Editing: {filename}"` | Top line in Discord presence |
 | `activity.state` | `string` | `"in {workspace}"` | Bottom line in Discord presence |
 | `activity.editor_image_key` | `string` | none | Large image asset key for editor icon |
@@ -36,6 +35,20 @@ Config location: `~/.config/discord-presence-lsp/config.toml`
 | `activity.button_label` | `string` | `"View Repository"` | Button label (only shown if git remote URL is detected) |
 | `activity.large_image_key` | `string` | none | Legacy fallback for editor large image key |
 | `activity.large_image_text` | `string` | none | Legacy fallback for editor large image text |
+
+### Editor Detection
+
+The editor name is automatically detected from the LSP client. The detection priority is:
+
+1. **CLI flag**: `--editor=<name>` (highest priority)
+2. **`initialization_options`**: From LSP `initialize` request (field: `editor` or `name`)
+3. **`client_info`**: From LSP handshake (e.g., "Helix 24.01")
+4. **Fallback**: "Unknown Editor"
+
+Example usage:
+```bash
+discord-lsp-presence --editor=helix
+```
 
 ### Time Tracking Modes
 
@@ -62,13 +75,15 @@ The `{filename}`, `{workspace}`, `{language}`, and `{editor}` placeholders can b
 
 ## Features
 
+- **Editor Auto-Detection**: Automatically detects the editor from LSP client info (CLI flag, initialization_options, or client_info)
 - **Workspace Detection**: Automatically detects the project/workspace name by walking up the directory tree looking for a `.git` or `.jj` folder, falling back to the immediate parent directory
 - **File Tracking**: Tracks the currently open file and workspace with timestamps
-- **Immediate Presence**: Sets Discord presence immediately when Helix opens with a file
+- **Immediate Presence**: Sets Discord presence immediately when the editor opens with a file
 - **Time Display**: Shows elapsed time in Discord (configurable: per-file or per-workspace)
 - **Flexible Configuration**: All settings are optional with sensible defaults
 - **Language Detection**: Detects language from file extension and can show language icon as the small image
-- **Editor Icon Support**: Configurable editor icon/text as the large image
+- **Editor Auto-Detection**: Automatically detects the editor from LSP client info and selects the matching Discord asset icon
+- **Editor Icon Support**: Auto-detected editor icon as the large image (can be overridden via config)
 - **View Repository Button**: Shows a clickable "View Repository" button when a git remote URL is detected (works with both Git and Jujutsu/JJ repositories)
 - **Git/Jujutsu Support**: Detects both Git (`.git/`) and Jujutsu (`.jj/`) repositories
 
@@ -82,7 +97,10 @@ The `{filename}`, `{workspace}`, `{language}`, and `{editor}` placeholders can b
 
 Upload Discord application assets for any icons you reference:
 
-- Editor icon key used by `activity.editor_image_key` (for example `helix`)
-- Optional language icon keys such as `rust`, `python`, `javascript`, `typescript`, `go`, `java`, `c`, `cpp`, `ruby`, `php`, `html`, `css`, `json`, `markdown`, `toml`, `yaml`, `shell`, `lua`, `kotlin`, `swift`
+**Editor icons** (auto-detected based on editor name):
+- `helix`, `neovim`, `vim`, `vscode`, `jetbrains`, `emacs`, `sublime`, `atom`, `zed`, `kate`, `notepadpp`
 
-If a language icon key is not uploaded in Discord, Discord simply omits that small image.
+**Language icons**:
+- `rust`, `python`, `javascript`, `typescript`, `go`, `java`, `c`, `cpp`, `ruby`, `php`, `html`, `css`, `json`, `markdown`, `toml`, `yaml`, `shell`, `lua`, `kotlin`, `swift`
+
+If an icon key is not uploaded in Discord, Discord simply omits that image. The editor icon can be overridden via `activity.editor_image_key` in config.
