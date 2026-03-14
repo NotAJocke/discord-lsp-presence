@@ -14,6 +14,9 @@ The codebase is organized into modular components:
 - **src/workspace.rs** - Workspace detection (looks for .git directory) and filename extraction from URIs
 - **src/discord.rs** - Discord Rich Presence update helpers
 - **src/language.rs** - Language detection from file extensions and Discord icon key mapping
+- **src/logging.rs** - Logging initialization with file output and rotation
+- **src/activity.rs** - Discord activity building helpers
+- **src/editor.rs** - Editor detection and icon mapping
 
 ## Configuration
 
@@ -72,6 +75,16 @@ language_images = true
 ### Placeholders
 
 The `{filename}`, `{workspace}`, `{language}`, and `{editor}` placeholders can be used in `details`, `state`, and image text fields.
+
+## Logging
+
+Logs are written to `~/.local/share/discord-lsp-presence/logs/app.log` with daily rotation. The logging system uses the `tracing` crate and outputs to both file and stderr.
+
+Log output includes:
+- Editor detection events
+- Discord connection status
+- Presence updates and errors
+- File/workspace changes
 
 ## Features
 

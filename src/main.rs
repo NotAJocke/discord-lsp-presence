@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tracing::{error, info};
 use url::Url;
 
 mod activity;
@@ -13,6 +14,7 @@ mod config;
 mod discord;
 mod editor;
 mod language;
+mod logging;
 mod state;
 mod workspace;
 
@@ -83,7 +85,7 @@ impl LanguageServer for Backend {
         let editor = detect_editor(&editor_name);
         *self.editor.lock().await = editor.clone();
         
-        eprintln!("Detected editor: {} (icon: {})", editor.name, if editor.icon_key.is_empty() { "none" } else { &editor.icon_key });
+        info!("Detected editor: {} (icon: {})", editor.name, if editor.icon_key.is_empty() { "none" } else { &editor.icon_key });
         
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -286,6 +288,8 @@ impl Backend {
 
 #[tokio::main]
 async fn main() {
+    logging::init_logging();
+
     let config = Arc::new(Config::load());
 
     let discord = Arc::new(Mutex::new(DiscordClient::new(config.get_application_id())));
@@ -305,15 +309,15 @@ async fn main() {
         let drpc = discord.lock().await;
 
         drpc.on_ready(move |_ctx| {
-            eprintln!("Discord client ready");
+            info!("Discord client ready");
 
             if !*enabled_for_ready.blocking_lock() {
-                eprintln!("Discord presence is disabled, skipping initial presence.");
+                info!("Discord presence is disabled, skipping initial presence.");
                 return;
             }
 
             if let Some(file_state) = current_file_for_ready.blocking_lock().as_ref() {
-                eprintln!("Setting initial presence for: {}", file_state.filename);
+                info!("Setting initial presence for: {}", file_state.filename);
                 let ts = match config_for_ready.get_time_tracking() {
                     TimeTracking::File => file_state.get_start_timestamp(),
                     TimeTracking::Workspace => current_workspace_for_ready
@@ -335,14 +339,14 @@ async fn main() {
                 );
                 let mut client = discord_for_ready.blocking_lock();
                 if let Err(e) = client.set_activity(|_| activity) {
-                    eprintln!("Failed to set initial activity: {}", e);
+                    error!("Failed to set initial activity: {}", e);
                 }
             }
         })
         .persist();
 
         drpc.on_error(|_ctx| {
-            eprintln!("Discord connection error. Exiting.");
+            error!("Discord connection error. Exiting.");
             std::process::exit(1);
         })
         .persist();

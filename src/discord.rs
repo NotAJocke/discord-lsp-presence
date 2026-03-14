@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::Client;
 use tower_lsp::lsp_types::MessageType;
+use tracing::{error, info};
 
 pub async fn update_presence(
     discord: &Arc<Mutex<DiscordClient>>,
@@ -25,6 +26,7 @@ pub async fn update_presence(
     match discord.set_activity(|_| activity) {
         Ok(_) => {
             let (details, state) = build_details_and_state(config, filename, workspace, language, &editor.name);
+            info!("Set activity to: {} {}", details, state);
             client
                 .log_message(
                     MessageType::INFO,
@@ -33,6 +35,7 @@ pub async fn update_presence(
                 .await;
         }
         Err(e) => {
+            error!("Failed to set activity: {}", e);
             client
                 .log_message(
                     MessageType::ERROR,
@@ -51,11 +54,13 @@ pub async fn clear_presence(
 
     match discord.clear_activity() {
         Ok(_) => {
+            info!("Discord presence cleared.");
             client
                 .log_message(MessageType::INFO, "Discord presence cleared.")
                 .await;
         }
         Err(e) => {
+            error!("Failed to clear presence: {}", e);
             client
                 .log_message(MessageType::ERROR, &format!("Failed to clear presence: {}", e))
                 .await;

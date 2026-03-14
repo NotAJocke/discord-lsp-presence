@@ -27,6 +27,8 @@ pub fn detect_editor(editor_name: &str) -> EditorInfo {
 
     if lower.contains("helix") {
         EditorInfo::new("Helix", "helix")
+    } else if lower.contains("opencode") {
+        EditorInfo::new("OpenCode", "opencode")
     } else if lower.contains("neovim") || lower.contains("nvim") {
         EditorInfo::new("Neovim", "neovim")
     } else if lower.contains("vim") || lower.contains("gvim") {
