@@ -10,8 +10,8 @@ mod workspace;
 
 use config::Config;
 use discord_presence::Client as DiscordClient;
-use server::Backend;
-use state::{FileState, WorkspaceState};
+use editor::EditorInfo;
+use server::{AppState, Backend};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -19,38 +19,20 @@ use tokio::sync::Mutex;
 async fn main() {
     logging::init_logging();
 
-    let config = Arc::new(Config::load());
-    let discord = Arc::new(Mutex::new(DiscordClient::new(config.get_application_id())));
-
-    let current_file: Arc<Mutex<Option<FileState>>> = Arc::new(Mutex::new(None));
-    let current_workspace: Arc<Mutex<Option<WorkspaceState>>> = Arc::new(Mutex::new(None));
-    let enabled: Arc<Mutex<bool>> = Arc::new(Mutex::new(config.is_enabled()));
-    let editor: Arc<Mutex<editor::EditorInfo>> = Arc::new(Mutex::new(editor::EditorInfo::default()));
-
-    discord::setup_discord_handlers(
-        &discord,
-        Arc::clone(&enabled),
-        Arc::clone(&current_file),
-        Arc::clone(&current_workspace),
-        Arc::clone(&config),
-        Arc::clone(&editor),
-    )
-    .await;
-
-    let current_file_clone = Arc::clone(&current_file);
-    let current_workspace_clone = Arc::clone(&current_workspace);
-    let config_clone = Arc::clone(&config);
-    let enabled_clone = Arc::clone(&enabled);
-    let editor_clone = Arc::clone(&editor);
-    let (service, socket) = tower_lsp::LspService::new(move |client| Backend {
-        client,
-        discord: Arc::clone(&discord),
-        config: Arc::clone(&config_clone),
-        editor: Arc::clone(&editor_clone),
-        current_file: Arc::clone(&current_file_clone),
-        current_workspace: Arc::clone(&current_workspace_clone),
-        enabled: Arc::clone(&enabled_clone),
+    let config = Config::load();
+    let enabled = config.is_enabled();
+    let state = Arc::new(AppState {
+        discord: Mutex::new(DiscordClient::new(config.get_application_id())),
+        config,
+        editor: Mutex::new(EditorInfo::default()),
+        current_file: Mutex::new(None),
+        current_workspace: Mutex::new(None),
+        enabled: Mutex::new(enabled),
     });
+
+    discord::setup_discord_handlers(state.clone()).await;
+
+    let (service, socket) = tower_lsp::LspService::new(move |client| Backend { client, state });
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();

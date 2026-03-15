@@ -6,7 +6,6 @@ use crate::state::{FileState, WorkspaceState};
 use crate::workspace::{detect_workspace_name, get_filename_from_uri, get_git_remote_url, is_git_repo};
 use clap::Parser;
 use discord_presence::Client as DiscordClient;
-use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -22,14 +21,18 @@ struct Args {
     editor: Option<String>,
 }
 
+pub struct AppState {
+    pub discord: Mutex<DiscordClient>,
+    pub config: Config,
+    pub editor: Mutex<EditorInfo>,
+    pub current_file: Mutex<Option<FileState>>,
+    pub current_workspace: Mutex<Option<WorkspaceState>>,
+    pub enabled: Mutex<bool>,
+}
+
 pub struct Backend {
     pub client: Client,
-    pub discord: Arc<Mutex<DiscordClient>>,
-    pub config: Arc<Config>,
-    pub editor: Arc<Mutex<EditorInfo>>,
-    pub current_file: Arc<Mutex<Option<FileState>>>,
-    pub current_workspace: Arc<Mutex<Option<WorkspaceState>>>,
-    pub enabled: Arc<Mutex<bool>>,
+    pub state: Arc<AppState>,
 }
 
 #[tower_lsp::async_trait]
@@ -38,7 +41,7 @@ impl LanguageServer for Backend {
         let cli_editor = Args::parse().editor;
         let editor_name = determine_editor_name(&params, cli_editor);
         let editor = detect_editor(&editor_name);
-        *self.editor.lock().await = editor.clone();
+        *self.state.editor.lock().await = editor.clone();
         
         tracing::info!("Detected editor: {} (icon: {})", editor.name, if editor.icon_key.is_empty() { "none" } else { &editor.icon_key });
         
@@ -65,7 +68,7 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        let mut discord = self.discord.lock().await;
+        let mut discord = self.state.discord.lock().await;
         discord.start();
 
         self.client
@@ -98,30 +101,30 @@ impl LanguageServer for Backend {
 
         match command {
             "discord-presence.enable" => {
-                let mut enabled = self.enabled.lock().await;
+                let mut enabled = self.state.enabled.lock().await;
                 if !*enabled {
                     *enabled = true;
                     self.client.log_message(MessageType::INFO, "Discord presence enabled.").await;
 
-                    if let Some(file_state) = self.current_file.lock().await.as_ref() {
+                    if let Some(file_state) = self.state.current_file.lock().await.as_ref() {
                         let language = detect_language(&file_state.filename);
-                        let ts = match self.config.get_time_tracking() {
+                        let ts = match self.state.config.get_time_tracking() {
                             TimeTracking::File => file_state.get_start_timestamp(),
-                            TimeTracking::Workspace => self.current_workspace.lock().await
+                            TimeTracking::Workspace => self.state.current_workspace.lock().await
                                 .as_ref()
                                 .map(|ws| ws.get_start_timestamp())
                                 .unwrap_or_else(|| file_state.get_start_timestamp()),
                         };
                         discord::update_presence(
-                            &self.discord,
+                            &self.state.discord,
                             &self.client,
-                            &self.config,
+                            &self.state.config,
                             &file_state.filename,
                             &file_state.workspace,
                             &language,
                             Some(ts),
                             file_state.git_remote_url.as_deref(),
-                            self.editor.lock().await.deref(),
+                            &*self.state.editor.lock().await,
                         ).await;
                     }
                 } else {
@@ -129,46 +132,46 @@ impl LanguageServer for Backend {
                 }
             }
             "discord-presence.disable" => {
-                let mut enabled = self.enabled.lock().await;
+                let mut enabled = self.state.enabled.lock().await;
                 if *enabled {
                     *enabled = false;
                     self.client.log_message(MessageType::INFO, "Discord presence disabled.").await;
-                    discord::clear_presence(&self.discord, &self.client).await;
+                    discord::clear_presence(&self.state.discord, &self.client).await;
                 } else {
                     self.client.log_message(MessageType::INFO, "Discord presence is already disabled.").await;
                 }
             }
             "discord-presence.toggle" => {
-                let mut enabled = self.enabled.lock().await;
+                let mut enabled = self.state.enabled.lock().await;
                 *enabled = !*enabled;
 
                 if *enabled {
                     self.client.log_message(MessageType::INFO, "Discord presence enabled.").await;
 
-                    if let Some(file_state) = self.current_file.lock().await.as_ref() {
+                    if let Some(file_state) = self.state.current_file.lock().await.as_ref() {
                         let language = detect_language(&file_state.filename);
-                        let ts = match self.config.get_time_tracking() {
+                        let ts = match self.state.config.get_time_tracking() {
                             TimeTracking::File => file_state.get_start_timestamp(),
-                            TimeTracking::Workspace => self.current_workspace.lock().await
+                            TimeTracking::Workspace => self.state.current_workspace.lock().await
                                 .as_ref()
                                 .map(|ws| ws.get_start_timestamp())
                                 .unwrap_or_else(|| file_state.get_start_timestamp()),
                         };
                         discord::update_presence(
-                            &self.discord,
+                            &self.state.discord,
                             &self.client,
-                            &self.config,
+                            &self.state.config,
                             &file_state.filename,
                             &file_state.workspace,
                             &language,
                             Some(ts),
                             file_state.git_remote_url.as_deref(),
-                            self.editor.lock().await.deref(),
+                            &*self.state.editor.lock().await,
                         ).await;
                     }
                 } else {
                     self.client.log_message(MessageType::INFO, "Discord presence disabled.").await;
-                    discord::clear_presence(&self.discord, &self.client).await;
+                    discord::clear_presence(&self.state.discord, &self.client).await;
                 }
             }
             _ => {}
@@ -180,7 +183,7 @@ impl LanguageServer for Backend {
 
 impl Backend {
     async fn handle_file_event(&self, uri: &Url) {
-        if !*self.enabled.lock().await {
+        if !*self.state.enabled.lock().await {
             return;
         }
 
@@ -197,7 +200,7 @@ impl Backend {
             let workspace = workspace_name.unwrap_or_else(|| "unknown workspace".to_string());
             let language = detect_language(&filename);
 
-            let start_timestamp = match self.config.get_time_tracking() {
+            let start_timestamp = match self.state.config.get_time_tracking() {
                 TimeTracking::File => {
                     let state = FileState::new(
                         filename.clone(),
@@ -205,11 +208,11 @@ impl Backend {
                         git_remote_url.clone(),
                     );
                     let ts = state.get_start_timestamp();
-                    *self.current_file.lock().await = Some(state);
+                    *self.state.current_file.lock().await = Some(state);
                     Some(ts)
                 }
                 TimeTracking::Workspace => {
-                    let mut current_workspace = self.current_workspace.lock().await;
+                    let mut current_workspace = self.state.current_workspace.lock().await;
                     let ts = match current_workspace.as_ref() {
                         Some(ws) if ws.workspace == workspace => ws.get_start_timestamp(),
                         _ => {
@@ -225,15 +228,15 @@ impl Backend {
 
             if DiscordClient::is_ready() {
                 discord::update_presence(
-                    &self.discord,
+                    &self.state.discord,
                     &self.client,
-                    &self.config,
+                    &self.state.config,
                     &filename,
                     &workspace,
                     &language,
                     start_timestamp,
                     git_remote_url.as_deref(),
-                    self.editor.lock().await.deref(),
+                    &*self.state.editor.lock().await,
                 )
                 .await;
             }
