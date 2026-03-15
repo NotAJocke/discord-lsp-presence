@@ -8,15 +8,16 @@ The language server does not implement any language features like diagnostics, c
 
 The codebase is organized into modular components:
 
-- **src/main.rs** - Main LSP server implementation, event handlers, and server initialization
+- **src/main.rs** - Application entry point, initialization and server startup
+- **src/server.rs** - Backend struct, LanguageServer trait implementation, and LSP event handlers
 - **src/state.rs** - FileState and WorkspaceState structs for tracking current file/workspace and timestamps
 - **src/config.rs** - Configuration management with optional fields and hardcoded defaults
 - **src/workspace.rs** - Workspace detection (looks for .git directory) and filename extraction from URIs
-- **src/discord.rs** - Discord Rich Presence update helpers
+- **src/discord.rs** - Discord Rich Presence update helpers and handler setup
 - **src/language.rs** - Language detection from file extensions and Discord icon key mapping
 - **src/logging.rs** - Logging initialization with file output and rotation
 - **src/activity.rs** - Discord activity building helpers
-- **src/editor.rs** - Editor detection and icon mapping
+- **src/editor.rs** - Editor detection, icon mapping, and LSP parameter parsing helpers
 
 ## Configuration
 

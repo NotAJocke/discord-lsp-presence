@@ -1,3 +1,5 @@
+use tower_lsp::lsp_types::InitializeParams;
+
 #[derive(Debug, Clone)]
 pub struct EditorInfo {
     pub name: String,
@@ -55,4 +57,38 @@ pub fn detect_editor(editor_name: &str) -> EditorInfo {
     } else {
         EditorInfo::new(editor_name, "")
     }
+}
+
+pub fn extract_editor_from_init_options(params: &InitializeParams) -> Option<String> {
+    let init_options = params.initialization_options.as_ref()?;
+
+    if let Some(editor) = init_options.get("editor").and_then(|v| v.as_str()) {
+        return Some(editor.to_string());
+    }
+
+    if let Some(name) = init_options.get("name").and_then(|v| v.as_str()) {
+        return Some(name.to_string());
+    }
+
+    None
+}
+
+pub fn extract_editor_from_client_info(params: &InitializeParams) -> Option<String> {
+    params.client_info.as_ref().map(|ci| ci.name.clone())
+}
+
+pub fn determine_editor_name(params: &InitializeParams, cli_editor: Option<String>) -> String {
+    if let Some(editor) = cli_editor {
+        return editor;
+    }
+
+    if let Some(editor) = extract_editor_from_init_options(params) {
+        return editor;
+    }
+
+    if let Some(editor) = extract_editor_from_client_info(params) {
+        return editor;
+    }
+
+    "Unknown Editor".to_string()
 }
