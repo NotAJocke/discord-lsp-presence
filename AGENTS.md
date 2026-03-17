@@ -30,6 +30,7 @@ Config location: `~/.config/discord-presence-lsp/config.toml`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `application_id` | `u64` | `1470506076574187745` | Discord application ID |
+| `enabled` | `bool` | `true` | Whether to update Discord presence |
 | `time_tracking` | `"file"` or `"workspace"` | `"file"` | How to track elapsed time |
 | `activity.details` | `string` | `"Editing: {filename}"` | Top line in Discord presence |
 | `activity.state` | `string` | `"in {workspace}"` | Bottom line in Discord presence |
@@ -63,6 +64,7 @@ discord-lsp-presence --editor=helix
 
 ```toml
 application_id = 123456789012345678
+enabled = true
 time_tracking = "workspace"
 
 [activity]
@@ -112,9 +114,9 @@ Log output includes:
 Upload Discord application assets for any icons you reference:
 
 **Editor icons** (auto-detected based on editor name):
-- `helix`, `neovim`, `vim`, `vscode`, `jetbrains`, `emacs`, `sublime`, `atom`, `zed`, `kate`, `notepadpp`
+- `helix`, `opencode`, `neovim`, `vim`, `vscode`, `jetbrains`, `emacs`, `sublime`, `atom`, `zed`, `kate`, `notepadpp`
 
 **Language icons**:
-- `rust`, `python`, `javascript`, `typescript`, `go`, `java`, `c`, `cpp`, `ruby`, `php`, `html`, `css`, `json`, `markdown`, `toml`, `yaml`, `shell`, `lua`, `kotlin`, `swift`
+- `rust`, `python`, `javascript`, `typescript`, `go`, `java`, `c`, `cpp`, `csharp`, `ruby`, `php`, `html`, `css`, `json`, `markdown`, `toml`, `yaml`, `shell`, `lua`, `kotlin`, `swift`, `zig`, `dart`, `elixir`, `erlang`, `scala`, `r`, `sql`
 
 If an icon key is not uploaded in Discord, Discord simply omits that image. The editor icon can be overridden via `activity.editor_image_key` in config.
