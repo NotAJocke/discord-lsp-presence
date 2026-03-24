@@ -54,6 +54,7 @@ pub fn detect_language(filename: &str) -> LanguageInfo {
         Some("scala") | Some("sc") => LanguageInfo::new("Scala", "scala"),
         Some("r") => LanguageInfo::new("R", "r"),
         Some("sql") => LanguageInfo::new("SQL", "sql"),
+        Some("ml") | Some("mli") => LanguageInfo::new("OCaml", "ocaml"),
         Some(ext) if !ext.is_empty() => LanguageInfo::new(ext, ""),
         _ => LanguageInfo::new("Unknown", ""),
     }
