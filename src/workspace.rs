@@ -183,3 +183,18 @@ pub fn get_filename_from_uri(uri: &Url) -> Option<String> {
         .and_then(|s| s.last())
         .map(|s| s.to_string())
 }
+
+pub fn get_project_config_path(uri: &Url) -> Option<std::path::PathBuf> {
+    let path = uri.to_file_path().ok()?;
+
+    let Some((root, _)) = find_vcs_root(&path) else {
+        return None;
+    };
+
+    let config_path = root.join(".discord-presence.toml");
+    if config_path.exists() {
+        Some(config_path)
+    } else {
+        None
+    }
+}

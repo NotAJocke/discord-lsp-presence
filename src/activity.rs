@@ -27,18 +27,41 @@ pub fn build_activity(
             } else {
                 None
             }
-        });
+        })
+        .filter(|s| !s.is_empty());
 
-    let config_has_text =
-        activity_config.editor_image_text.is_some() || activity_config.large_image_text.is_some();
+    let config_has_text = activity_config
+        .editor_image_text
+        .as_ref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+        || activity_config
+            .large_image_text
+            .as_ref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
 
-    let large_image_text = if !config_has_text && !editor.icon_key.is_empty() {
-        Some(editor.name.clone())
-    } else {
+    let large_image_text = if !config_has_text
+        && !editor.icon_key.is_empty()
+        && large_image_key.is_some()
+    {
+        Some(replace_placeholders(
+            &editor.name,
+            filename,
+            workspace,
+            language,
+            &editor.name,
+        ))
+    } else if activity_config.editor_image_text.is_some()
+        || activity_config.large_image_text.is_some()
+    {
         activity_config
             .editor_image_text
             .or(activity_config.large_image_text)
+            .filter(|s| !s.is_empty())
             .map(|text| replace_placeholders(&text, filename, workspace, language, &editor.name))
+    } else {
+        None
     };
 
     let small_image_key = if config.show_language_images() && !language.icon_key.is_empty() {
@@ -48,7 +71,15 @@ pub fn build_activity(
     };
     let small_image_text = small_image_key.as_ref().map(|_| language.name.clone());
 
-    let mut builder = Activity::new().details(details).state(state);
+    let mut builder = if details.is_empty() && state.is_empty() {
+        Activity::new()
+    } else if details.is_empty() {
+        Activity::new().state(state)
+    } else if state.is_empty() {
+        Activity::new().details(details)
+    } else {
+        Activity::new().details(details).state(state)
+    };
 
     if let Some(ts) = start_timestamp {
         builder = builder.timestamps(|_| ActivityTimestamps::new().start(ts));
@@ -76,6 +107,7 @@ pub fn build_activity(
     if let Some(remote_url) = git_remote_url {
         let button_label = activity_config
             .button_label
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "View Repository".to_string());
         builder = builder.append_buttons(|_| {
             ActivityButton::new()
@@ -103,14 +135,22 @@ pub fn build_details_and_state(
         .state
         .unwrap_or_else(|| crate::config::DEFAULT_STATE.to_string());
 
-    let details = replace_placeholders(
-        &details_template,
-        filename,
-        workspace,
-        language,
-        editor_name,
-    );
-    let state = replace_placeholders(&state_template, filename, workspace, language, editor_name);
+    let details = if details_template.is_empty() {
+        String::new()
+    } else {
+        replace_placeholders(
+            &details_template,
+            filename,
+            workspace,
+            language,
+            editor_name,
+        )
+    };
+    let state = if state_template.is_empty() {
+        String::new()
+    } else {
+        replace_placeholders(&state_template, filename, workspace, language, editor_name)
+    };
 
     (details, state)
 }

@@ -14,6 +14,11 @@ pub fn get_config_path() -> Option<PathBuf> {
     get_config_dir().map(|dir| dir.join("config.toml"))
 }
 
+pub fn load_project_config(path: &PathBuf) -> Option<Config> {
+    let config_str = std::fs::read_to_string(path).ok()?;
+    toml::from_str(&config_str).ok()
+}
+
 #[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TimeTracking {
@@ -34,7 +39,7 @@ pub struct ActivityConfig {
     pub button_label: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Clone, Default)]
 pub struct Config {
     #[serde(default)]
     pub application_id: Option<u64>,
@@ -96,5 +101,48 @@ impl Config {
 
     pub fn is_enabled(&self) -> bool {
         self.enabled.unwrap_or(true)
+    }
+
+    pub fn merge_with(&self, project_config: &Config) -> Config {
+        let merged_activity = match (&self.activity, &project_config.activity) {
+            (Some(global), Some(project)) => {
+                let mut merged = global.clone();
+                if project.details.is_some() {
+                    merged.details = project.details.clone();
+                }
+                if project.state.is_some() {
+                    merged.state = project.state.clone();
+                }
+                if project.large_image_key.is_some() {
+                    merged.large_image_key = project.large_image_key.clone();
+                }
+                if project.large_image_text.is_some() {
+                    merged.large_image_text = project.large_image_text.clone();
+                }
+                if project.editor_image_key.is_some() {
+                    merged.editor_image_key = project.editor_image_key.clone();
+                }
+                if project.editor_image_text.is_some() {
+                    merged.editor_image_text = project.editor_image_text.clone();
+                }
+                if project.language_images.is_some() {
+                    merged.language_images = project.language_images.clone();
+                }
+                if project.button_label.is_some() {
+                    merged.button_label = project.button_label.clone();
+                }
+                Some(merged)
+            }
+            (Some(global), None) => Some(global.clone()),
+            (None, Some(project)) => Some(project.clone()),
+            (None, None) => None,
+        };
+
+        Config {
+            application_id: project_config.application_id.or(self.application_id),
+            enabled: project_config.enabled.or(self.enabled),
+            time_tracking: project_config.time_tracking.or(self.time_tracking),
+            activity: merged_activity,
+        }
     }
 }

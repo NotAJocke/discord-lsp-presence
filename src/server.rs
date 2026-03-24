@@ -1,9 +1,9 @@
-use crate::config::{Config, TimeTracking};
+use crate::config::{load_project_config, Config, TimeTracking};
 use crate::discord;
 use crate::editor::{detect_editor, determine_editor_name, EditorInfo};
 use crate::language::detect_language;
 use crate::state::{FileState, WorkspaceState};
-use crate::workspace::{detect_workspace_name, get_filename_from_uri, get_git_remote_url, is_git_repo};
+use crate::workspace::{detect_workspace_name, get_filename_from_uri, get_git_remote_url, get_project_config_path, is_git_repo};
 use clap::Parser;
 use discord_presence::Client as DiscordClient;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ struct Args {
 
 pub struct AppState {
     pub discord: Mutex<DiscordClient>,
-    pub config: Config,
+    pub config: Mutex<Config>,
     pub editor: Mutex<EditorInfo>,
     pub current_file: Mutex<Option<FileState>>,
     pub current_workspace: Mutex<Option<WorkspaceState>>,
@@ -98,6 +98,7 @@ impl LanguageServer for Backend {
 
     async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
         let command = params.command.as_str();
+        let config = self.state.config.lock().await.clone();
 
         match command {
             "discord-presence.enable" => {
@@ -108,7 +109,7 @@ impl LanguageServer for Backend {
 
                     if let Some(file_state) = self.state.current_file.lock().await.as_ref() {
                         let language = detect_language(&file_state.filename);
-                        let ts = match self.state.config.get_time_tracking() {
+                        let ts = match config.get_time_tracking() {
                             TimeTracking::File => file_state.get_start_timestamp(),
                             TimeTracking::Workspace => self.state.current_workspace.lock().await
                                 .as_ref()
@@ -118,7 +119,7 @@ impl LanguageServer for Backend {
                         discord::update_presence(
                             &self.state.discord,
                             &self.client,
-                            &self.state.config,
+                            &config,
                             &file_state.filename,
                             &file_state.workspace,
                             &language,
@@ -150,7 +151,7 @@ impl LanguageServer for Backend {
 
                     if let Some(file_state) = self.state.current_file.lock().await.as_ref() {
                         let language = detect_language(&file_state.filename);
-                        let ts = match self.state.config.get_time_tracking() {
+                        let ts = match config.get_time_tracking() {
                             TimeTracking::File => file_state.get_start_timestamp(),
                             TimeTracking::Workspace => self.state.current_workspace.lock().await
                                 .as_ref()
@@ -160,7 +161,7 @@ impl LanguageServer for Backend {
                         discord::update_presence(
                             &self.state.discord,
                             &self.client,
-                            &self.state.config,
+                            &config,
                             &file_state.filename,
                             &file_state.workspace,
                             &language,
@@ -200,7 +201,17 @@ impl Backend {
             let workspace = workspace_name.unwrap_or_else(|| "unknown workspace".to_string());
             let language = detect_language(&filename);
 
-            let start_timestamp = match self.state.config.get_time_tracking() {
+            if let Some(config_path) = get_project_config_path(uri) {
+                if let Some(project_config) = load_project_config(&config_path) {
+                    tracing::info!("Loaded project config from: {:?}", config_path);
+                    let merged = self.state.config.lock().await.merge_with(&project_config);
+                    *self.state.config.lock().await = merged;
+                }
+            };
+
+            let config = self.state.config.lock().await.clone();
+
+            let start_timestamp = match config.get_time_tracking() {
                 TimeTracking::File => {
                     let state = FileState::new(
                         filename.clone(),
@@ -230,7 +241,7 @@ impl Backend {
                 discord::update_presence(
                     &self.state.discord,
                     &self.client,
-                    &self.state.config,
+                    &config,
                     &filename,
                     &workspace,
                     &language,

@@ -79,6 +79,39 @@ language_images = true
 
 The `{filename}`, `{workspace}`, `{language}`, and `{editor}` placeholders can be used in `details`, `state`, and image text fields.
 
+### Project-Level Configuration
+
+You can override global settings per-project by creating `.discord-presence.toml` in your project root (where `.git` or `.jj` lives). Project config merges with global config - project values override global ones.
+
+**Example:**
+
+Global config (`~/.config/discord-presence-lsp/config.toml`):
+```toml
+[activity]
+details = "Editing: {filename}"
+state = "in {workspace}"
+```
+
+Project config (`.discord-presence.toml`):
+```toml
+[activity]
+details = "Working on {language}"
+state = ""  # Override to show nothing
+```
+
+**Unsetting Fields:**
+
+Set empty string to override a field with nothing. This works for all string fields:
+
+| Field | Empty string value |
+|-------|-------------------|
+| `state = ""` | Removes the state line |
+| `details = ""` | Removes the details line |
+| `button_label = ""` | Removes the repository button |
+| `large_image_key = ""` | Falls back to auto-detected editor icon |
+| `editor_image_text = ""` | Shows editor name (or nothing if also empty) |
+| `language_images = false` | Disables language icons per-project |
+
 ## Logging
 
 Logs are written to `~/.local/share/discord-lsp-presence/logs/app.log` with daily rotation. The logging system uses the `tracing` crate and outputs to both file and stderr.
@@ -91,17 +124,17 @@ Log output includes:
 
 ## Features
 
-- **Editor Auto-Detection**: Automatically detects the editor from LSP client info (CLI flag, initialization_options, or client_info)
+- **Editor Auto-Detection**: Automatically detects the editor from LSP client info (CLI flag, initialization_options, or client_info) and selects the matching Discord asset icon
 - **Workspace Detection**: Automatically detects the project/workspace name by walking up the directory tree looking for a `.git` or `.jj` folder, falling back to the immediate parent directory
 - **File Tracking**: Tracks the currently open file and workspace with timestamps
 - **Immediate Presence**: Sets Discord presence immediately when the editor opens with a file
 - **Time Display**: Shows elapsed time in Discord (configurable: per-file or per-workspace)
 - **Flexible Configuration**: All settings are optional with sensible defaults
 - **Language Detection**: Detects language from file extension and can show language icon as the small image
-- **Editor Auto-Detection**: Automatically detects the editor from LSP client info and selects the matching Discord asset icon
 - **Editor Icon Support**: Auto-detected editor icon as the large image (can be overridden via config)
 - **View Repository Button**: Shows a clickable "View Repository" button when a git remote URL is detected (works with both Git and Jujutsu/JJ repositories)
 - **Git/Jujutsu Support**: Detects both Git (`.git/`) and Jujutsu (`.jj/`) repositories
+- **Project-Level Config**: Override global settings per-project with `.discord-presence.toml`
 
 ## Current Limitations
 

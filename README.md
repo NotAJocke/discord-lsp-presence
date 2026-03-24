@@ -95,6 +95,39 @@ Use `{filename}`, `{workspace}`, `{language}`, and `{editor}` in text fields.
 - No `did_close` handling
 - Buttons are not visible to the user who set the presence (other users can see them)
 
+## Project-Level Configuration
+
+You can override global settings per-project by creating `.discord-presence.toml` in your project root (where `.git` or `.jj` lives). Project config merges with global config - project values override global ones.
+
+### Example
+
+Global config (`~/.config/discord-presence-lsp/config.toml`):
+```toml
+[activity]
+details = "Editing: {filename}"
+state = "in {workspace}"
+```
+
+Project config (`.discord-presence.toml`):
+```toml
+[activity]
+details = "Working on {language}"
+state = ""  # Override to show nothing
+```
+
+### Unsetting Fields
+
+Set empty string to override a field with nothing. This works for all string fields:
+
+| Field | Empty string value |
+|-------|-------------------|
+| `state = ""` | Removes the state line |
+| `details = ""` | Removes the details line |
+| `button_label = ""` | Removes the repository button |
+| `large_image_key = ""` | Falls back to auto-detected editor icon |
+| `editor_image_text = ""` | Shows editor name (or nothing if also empty) |
+| `language_images = false` | Disables language icons per-project |
+
 ## License
 
 MIT

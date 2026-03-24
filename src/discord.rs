@@ -73,7 +73,7 @@ pub async fn setup_discord_handlers(state: Arc<AppState>) {
     let state_for_ready = state.clone();
     state.discord.lock().await.on_ready(move |_ctx| {
         let discord = &state_for_ready.discord;
-        let config = &state_for_ready.config;
+        let config = state_for_ready.config.blocking_lock();
         let enabled = &state_for_ready.enabled;
         let current_file = &state_for_ready.current_file;
         let current_workspace = &state_for_ready.current_workspace;
@@ -98,7 +98,7 @@ pub async fn setup_discord_handlers(state: Arc<AppState>) {
             };
             let language = detect_language(&file_state.filename);
             let activity = build_activity(
-                config,
+                &config,
                 &file_state.filename,
                 &file_state.workspace,
                 &language,

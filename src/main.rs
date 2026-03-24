@@ -23,7 +23,7 @@ async fn main() {
     let enabled = config.is_enabled();
     let state = Arc::new(AppState {
         discord: Mutex::new(DiscordClient::new(config.get_application_id())),
-        config,
+        config: Mutex::new(config),
         editor: Mutex::new(EditorInfo::default()),
         current_file: Mutex::new(None),
         current_workspace: Mutex::new(None),
