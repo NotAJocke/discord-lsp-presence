@@ -1,6 +1,6 @@
 use std::path::Path;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanguageInfo {
     pub name: String,
     pub icon_key: String,

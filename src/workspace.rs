@@ -20,6 +20,16 @@ fn find_vcs_root(path: &std::path::Path) -> Option<(PathBuf, VcsType)> {
     None
 }
 
+pub fn detect_workspace_root(uri: &Url) -> Option<PathBuf> {
+    let path = uri.to_file_path().ok()?;
+
+    if let Some((root, _)) = find_vcs_root(&path) {
+        return Some(root);
+    }
+
+    path.parent().map(|dir| dir.to_path_buf())
+}
+
 #[derive(PartialEq)]
 enum VcsType {
     Git,
@@ -40,15 +50,6 @@ pub fn detect_workspace_name(uri: &Url) -> Option<String> {
         .and_then(|dir| dir.file_name())
         .and_then(|name| name.to_str())
         .map(|s| s.to_string())
-}
-
-pub fn is_git_repo(uri: &Url) -> bool {
-    let path = match uri.to_file_path() {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    find_vcs_root(&path).is_some()
 }
 
 pub fn get_git_remote_url(uri: &Url) -> Option<String> {

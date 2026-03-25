@@ -12,6 +12,7 @@ use config::Config;
 use discord_presence::Client as DiscordClient;
 use editor::EditorInfo;
 use server::{AppState, Backend};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -21,12 +22,16 @@ async fn main() {
 
     let config = Config::load();
     let enabled = config.is_enabled();
+    let base_config = config.clone();
     let state = Arc::new(AppState {
         discord: Mutex::new(DiscordClient::new(config.get_application_id())),
+        base_config,
         config: Mutex::new(config),
         editor: Mutex::new(EditorInfo::default()),
         current_file: Mutex::new(None),
         current_workspace: Mutex::new(None),
+        workspace_cache: Mutex::new(HashMap::new()),
+        last_presence_snapshot: Mutex::new(None),
         enabled: Mutex::new(enabled),
     });
 

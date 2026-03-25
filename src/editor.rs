@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types::InitializeParams;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorInfo {
     pub name: String,
     pub icon_key: String,

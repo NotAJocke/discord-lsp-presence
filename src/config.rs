@@ -27,7 +27,7 @@ pub enum TimeTracking {
     Workspace,
 }
 
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct ActivityConfig {
     pub details: Option<String>,
     pub state: Option<String>,
@@ -39,7 +39,7 @@ pub struct ActivityConfig {
     pub button_label: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Clone, Default)]
+#[derive(Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
     #[serde(default)]
     pub application_id: Option<u64>,

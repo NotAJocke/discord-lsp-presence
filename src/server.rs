@@ -1,11 +1,16 @@
 use crate::config::{load_project_config, Config, TimeTracking};
 use crate::discord;
 use crate::editor::{detect_editor, determine_editor_name, EditorInfo};
-use crate::language::detect_language;
+use crate::language::{detect_language, LanguageInfo};
 use crate::state::{FileState, WorkspaceState};
-use crate::workspace::{detect_workspace_name, get_filename_from_uri, get_git_remote_url, get_project_config_path, is_git_repo};
+use crate::workspace::{
+    detect_workspace_name, detect_workspace_root, get_filename_from_uri, get_git_remote_url,
+    get_project_config_path,
+};
 use clap::Parser;
 use discord_presence::Client as DiscordClient;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -21,12 +26,33 @@ struct Args {
     editor: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct WorkspaceCacheEntry {
+    workspace: String,
+    git_remote_url: Option<String>,
+    config: Config,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PresenceSnapshot {
+    filename: String,
+    workspace: String,
+    language: LanguageInfo,
+    start_timestamp: Option<u64>,
+    git_remote_url: Option<String>,
+    config: Config,
+    editor: EditorInfo,
+}
+
 pub struct AppState {
     pub discord: Mutex<DiscordClient>,
+    pub base_config: Config,
     pub config: Mutex<Config>,
     pub editor: Mutex<EditorInfo>,
     pub current_file: Mutex<Option<FileState>>,
     pub current_workspace: Mutex<Option<WorkspaceState>>,
+    pub workspace_cache: Mutex<HashMap<PathBuf, WorkspaceCacheEntry>>,
+    pub last_presence_snapshot: Mutex<Option<PresenceSnapshot>>,
     pub enabled: Mutex<bool>,
 }
 
@@ -89,10 +115,6 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        self.client
-            .log_message(MessageType::INFO, "File changed")
-            .await;
-
         self.handle_file_event(&params.text_document.uri).await;
     }
 
@@ -137,6 +159,7 @@ impl LanguageServer for Backend {
                 if *enabled {
                     *enabled = false;
                     self.client.log_message(MessageType::INFO, "Discord presence disabled.").await;
+                    *self.state.last_presence_snapshot.lock().await = None;
                     discord::clear_presence(&self.state.discord, &self.client).await;
                 } else {
                     self.client.log_message(MessageType::INFO, "Discord presence is already disabled.").await;
@@ -172,6 +195,7 @@ impl LanguageServer for Backend {
                     }
                 } else {
                     self.client.log_message(MessageType::INFO, "Discord presence disabled.").await;
+                    *self.state.last_presence_snapshot.lock().await = None;
                     discord::clear_presence(&self.state.discord, &self.client).await;
                 }
             }
@@ -183,74 +207,143 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
+    async fn should_update_presence(&self, snapshot: &PresenceSnapshot) -> bool {
+        let mut last = self.state.last_presence_snapshot.lock().await;
+        if last.as_ref() == Some(snapshot) {
+            false
+        } else {
+            *last = Some(snapshot.clone());
+            true
+        }
+    }
+
+    async fn resolve_event_context(&self, uri: &Url) -> (String, Option<String>, Config) {
+        if let Some(root) = detect_workspace_root(uri) {
+            if let Some(entry) = self.state.workspace_cache.lock().await.get(&root).cloned() {
+                return (entry.workspace, entry.git_remote_url, entry.config);
+            }
+
+            let workspace = detect_workspace_name(uri)
+                .unwrap_or_else(|| "unknown workspace".to_string());
+            let git_remote_url = get_git_remote_url(uri);
+            let config = if let Some(config_path) = get_project_config_path(uri) {
+                if let Some(project_config) = load_project_config(&config_path) {
+                    tracing::info!("Loaded project config from: {:?}", config_path);
+                    self.state.base_config.merge_with(&project_config)
+                } else {
+                    self.state.base_config.clone()
+                }
+            } else {
+                self.state.base_config.clone()
+            };
+
+            self.state.workspace_cache.lock().await.insert(
+                root,
+                WorkspaceCacheEntry {
+                    workspace: workspace.clone(),
+                    git_remote_url: git_remote_url.clone(),
+                    config: config.clone(),
+                },
+            );
+
+            (workspace, git_remote_url, config)
+        } else {
+            let workspace = detect_workspace_name(uri)
+                .unwrap_or_else(|| "unknown workspace".to_string());
+            let git_remote_url = get_git_remote_url(uri);
+            (workspace, git_remote_url, self.state.base_config.clone())
+        }
+    }
+
     async fn handle_file_event(&self, uri: &Url) {
         if !*self.state.enabled.lock().await {
             return;
         }
 
-        let filename = get_filename_from_uri(uri);
-        let workspace_name = detect_workspace_name(uri);
-        let git_repo = is_git_repo(uri);
-        let git_remote_url = if git_repo {
-            get_git_remote_url(uri)
-        } else {
-            None
+        let Some(filename) = get_filename_from_uri(uri) else {
+            return;
         };
 
-        if let Some(filename) = filename {
-            let workspace = workspace_name.unwrap_or_else(|| "unknown workspace".to_string());
-            let language = detect_language(&filename);
+        let (workspace, git_remote_url, config) = self.resolve_event_context(uri).await;
+        let language = detect_language(&filename);
 
-            if let Some(config_path) = get_project_config_path(uri) {
-                if let Some(project_config) = load_project_config(&config_path) {
-                    tracing::info!("Loaded project config from: {:?}", config_path);
-                    let merged = self.state.config.lock().await.merge_with(&project_config);
-                    *self.state.config.lock().await = merged;
+        {
+            let mut current_config = self.state.config.lock().await;
+            if *current_config != config {
+                *current_config = config.clone();
+            }
+        }
+
+        let file_start_timestamp = {
+            let mut current_file = self.state.current_file.lock().await;
+            match current_file.as_ref() {
+                Some(state)
+                    if state.filename == filename
+                        && state.workspace == workspace
+                        && state.git_remote_url == git_remote_url =>
+                {
+                    state.get_start_timestamp()
                 }
-            };
-
-            let config = self.state.config.lock().await.clone();
-
-            let start_timestamp = match config.get_time_tracking() {
-                TimeTracking::File => {
+                _ => {
                     let state = FileState::new(
                         filename.clone(),
                         workspace.clone(),
                         git_remote_url.clone(),
                     );
                     let ts = state.get_start_timestamp();
-                    *self.state.current_file.lock().await = Some(state);
-                    Some(ts)
+                    *current_file = Some(state);
+                    ts
                 }
-                TimeTracking::Workspace => {
-                    let mut current_workspace = self.state.current_workspace.lock().await;
-                    let ts = match current_workspace.as_ref() {
-                        Some(ws) if ws.workspace == workspace => ws.get_start_timestamp(),
-                        _ => {
-                            let new_ws = WorkspaceState::new(workspace.clone());
-                            let ts = new_ws.get_start_timestamp();
-                            *current_workspace = Some(new_ws);
-                            ts
-                        }
-                    };
-                    Some(ts)
-                }
-            };
-
-            if DiscordClient::is_ready() {
-                discord::update_presence(
-                    &self.state.discord,
-                    &self.client,
-                    &config,
-                    &filename,
-                    &workspace,
-                    &language,
-                    start_timestamp,
-                    git_remote_url.as_deref(),
-                    &*self.state.editor.lock().await,
-                )
-                .await;
             }
+        };
+
+        let start_timestamp = match config.get_time_tracking() {
+            TimeTracking::File => Some(file_start_timestamp),
+            TimeTracking::Workspace => {
+                let mut current_workspace = self.state.current_workspace.lock().await;
+                let ts = match current_workspace.as_ref() {
+                    Some(ws) if ws.workspace == workspace => ws.get_start_timestamp(),
+                    _ => {
+                        let new_ws = WorkspaceState::new(workspace.clone());
+                        let ts = new_ws.get_start_timestamp();
+                        *current_workspace = Some(new_ws);
+                        ts
+                    }
+                };
+                Some(ts)
+            }
+        };
+
+        if !DiscordClient::is_ready() {
+            return;
         }
+
+        let editor = self.state.editor.lock().await.clone();
+        let snapshot = PresenceSnapshot {
+            filename: filename.clone(),
+            workspace: workspace.clone(),
+            language: language.clone(),
+            start_timestamp,
+            git_remote_url: git_remote_url.clone(),
+            config: config.clone(),
+            editor: editor.clone(),
+        };
+
+        if !self.should_update_presence(&snapshot).await {
+            return;
+        }
+
+        discord::update_presence(
+            &self.state.discord,
+            &self.client,
+            &config,
+            &filename,
+            &workspace,
+            &language,
+            start_timestamp,
+            git_remote_url.as_deref(),
+            &editor,
+        )
+        .await;
     }
 }
